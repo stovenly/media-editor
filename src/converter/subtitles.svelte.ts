@@ -8,7 +8,7 @@ import type { Task } from '../engine/scheduler/scheduler.svelte';
 import { plainError } from './errors';
 import { files, type FileItem } from './files.svelte';
 import type { Output } from './run';
-import { wakeLock } from './wake-lock';
+import { wakeLock } from './wake-lock.svelte';
 
 const MB = 1024 * 1024;
 

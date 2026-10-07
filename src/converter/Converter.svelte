@@ -17,6 +17,7 @@
   import OptionsPanel from './OptionsPanel.svelte';
   import OutputBar from './OutputBar.svelte';
   import { subtitleAdder } from './subtitles.svelte';
+  import { wakeLock } from './wake-lock.svelte';
   import SubtitlePanel from './SubtitlePanel.svelte';
 
   const add = (picked: File[]) => projects.intake(picked);
@@ -128,6 +129,11 @@
     >
       <span class="flex-1 text-sm text-muted tabular-nums">
         {#if total}{total.exact ? '' : 'About '}{formatBytes(total.bytes)} in total{/if}
+        {#if wakeLock.busy}<span class="block text-xs" role="status"
+            >Keep this tab open until your files are ready.{wakeLock.frozeDuringWork
+              ? ' The browser paused it in the background, which slowed things down.'
+              : ''}</span
+          >{/if}
       </span>
       {#if zipError}<span class="text-sm text-danger">{zipError}</span>{/if}
       {#if busy}

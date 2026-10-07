@@ -26,6 +26,7 @@
   import { Dialog } from 'bits-ui';
   import { formatBytes } from '../../app/format';
   import { files, type FileItem } from '../../converter/files.svelte';
+  import { wakeLock } from '../../converter/wake-lock.svelte';
   import { hub } from '../../engine';
   import { messageOf } from '../../engine/errors';
   import { videoBitrate } from '../../engine/av/plan';
@@ -349,6 +350,7 @@
     playing = false;
     exportError = null;
     exported = null;
+    wakeLock.hold('video-export');
     try {
       const result = await session.export(
         project,
@@ -372,6 +374,7 @@
       exportError = messageOf(error);
     } finally {
       exporting = null;
+      wakeLock.release('video-export');
     }
   }
 
@@ -1168,6 +1171,7 @@
                     <LoaderCircle size={14} class="animate-spin" />
                     {exporting.stage} · {Math.round((hub.latest.get(exporting.jobId) ?? 0) * 100)}%
                   </p>
+                  <p class="text-xs text-muted">Keep this tab open until the export is ready.</p>
                 {:else}
                   <button
                     type="button"

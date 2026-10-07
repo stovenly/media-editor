@@ -8,7 +8,7 @@ import { target } from '../engine/targets';
 import { plainError } from './errors';
 import { files, type FileItem } from './files.svelte';
 import { imageSettings, startJob, type Output } from './run';
-import { wakeLock } from './wake-lock';
+import { wakeLock } from './wake-lock.svelte';
 
 export type CombineTarget = 'mp4' | 'webm' | 'gif-anim' | 'webp-anim' | 'apng';
 

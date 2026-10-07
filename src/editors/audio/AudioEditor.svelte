@@ -14,6 +14,7 @@
   import { Dialog } from 'bits-ui';
   import { formatBytes } from '../../app/format';
   import { files, type FileItem } from '../../converter/files.svelte';
+  import { wakeLock } from '../../converter/wake-lock.svelte';
   import { hub } from '../../engine';
   import { messageOf } from '../../engine/errors';
   import { audioBitrate } from '../../engine/av/plan';
@@ -178,6 +179,7 @@
     exported = null;
     exportError = null;
     exporting = { jobId: null, stage: 'Exporting' };
+    wakeLock.hold('audio-export');
     try {
       const out = target(exportTarget);
       const result = await session.export(
@@ -239,6 +241,7 @@
       exportError = messageOf(error);
     } finally {
       exporting = null;
+      wakeLock.release('audio-export');
     }
   }
 

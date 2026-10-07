@@ -8,7 +8,7 @@ import { estimateBytes } from '../engine/av/plan';
 import { avSettings, startJob, type Job, type Output } from './run';
 import { messageOf } from '../engine/errors';
 import { plainError } from './errors';
-import { wakeLock } from './wake-lock';
+import { wakeLock } from './wake-lock.svelte';
 
 export type JobState =
   | { status: 'idle' }
