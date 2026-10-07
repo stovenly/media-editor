@@ -129,7 +129,12 @@ write(
 write('gradient.ppm', rgbGradient().writeToBuffer('.ppm'));
 write(
   'stripes.png',
-  vips.Image.xyz(4000, 3000).extractBand(0).remainder(2).linear(255, 0).cast('uchar').pngsaveBuffer(),
+  vips.Image.xyz(4000, 3000)
+    .extractBand(0)
+    .remainder(2)
+    .linear(255, 0)
+    .cast('uchar')
+    .pngsaveBuffer(),
 );
 write(
   'shape.svg',
