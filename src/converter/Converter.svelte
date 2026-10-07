@@ -20,6 +20,18 @@
   import SubtitlePanel from './SubtitlePanel.svelte';
 
   const add = (picked: File[]) => projects.intake(picked);
+  let dropZone = $state<ReturnType<typeof DropZone>>();
+
+  function keydown(event: KeyboardEvent) {
+    if (editing.current || !(event.ctrlKey || event.metaKey)) return;
+    if (event.key.toLowerCase() === 'o') {
+      event.preventDefault();
+      dropZone?.pick();
+    } else if (event.key === 'Enter' && pending.length) {
+      event.preventDefault();
+      files.convertAll();
+    }
+  }
   const count = $derived(files.items.length);
   const ready = $derived(files.items.filter((item) => item.status === 'ready').length);
   const pending = $derived(files.pending());
@@ -75,12 +87,14 @@
   }
 </script>
 
+<svelte:window onkeydown={keydown} />
+
 {#if count === 0}
-  <DropZone onFiles={add} />
+  <DropZone bind:this={dropZone} onFiles={add} />
 {:else}
   <div class="space-y-4">
     <div class="flex items-center justify-between gap-3">
-      <DropZone onFiles={add} compact />
+      <DropZone bind:this={dropZone} onFiles={add} compact />
       <button
         type="button"
         class="rounded-full px-3 py-2 text-sm text-muted transition-colors hover:text-fg"

@@ -30,6 +30,7 @@
     type Rect,
     type Redaction,
   } from '../../project/image-edit';
+  import { isTyping } from '../../app/shortcuts.svelte';
   import { saveProject } from '../../project/save';
   import ProjectMenu from '../../project/ProjectMenu.svelte';
   import CropOverlay from './CropOverlay.svelte';
@@ -210,6 +211,13 @@
     } else if (mod && event.key.toLowerCase() === 'y') {
       event.preventDefault();
       history.redo();
+    } else if (isTyping(event.target) || mod || event.altKey) {
+      return;
+    } else if (event.key.toLowerCase() === 'r') {
+      rotateBy(event.shiftKey ? -90 : 90);
+    } else if (event.key.toLowerCase() === 'f') {
+      if (event.shiftKey) set('Flip', { flipV: !edit.flipV });
+      else set('Flip', { flipH: !edit.flipH });
     } else if (
       (event.key === 'Delete' || event.key === 'Backspace') &&
       selected &&

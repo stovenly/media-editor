@@ -7,6 +7,10 @@
   let filePicker: HTMLInputElement;
   let folderPicker: HTMLInputElement;
 
+  export function pick() {
+    filePicker.click();
+  }
+
   function picked(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
     onFiles([...(input.files ?? [])].filter((file) => !file.name.startsWith('.')));
