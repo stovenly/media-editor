@@ -1,0 +1,110 @@
+@import 'tailwindcss';
+
+/* Light and dark values in one place; `color-scheme` on <html> picks between them. */
+:root {
+  color-scheme: light dark;
+  --surface: light-dark(#f7f7f8, #0f0f12);
+  --surface-raised: light-dark(#ffffff, #18181c);
+  --surface-sunken: light-dark(#eeeef1, #0a0a0c);
+  --border: light-dark(#e3e3e8, #2a2a31);
+  --text: light-dark(#18181b, #ededf0);
+  --text-muted: light-dark(#63636e, #9a9aa6);
+  --accent: light-dark(#4f46e5, #818cf8);
+  --accent-hover: light-dark(#4338ca, #a5b4fc);
+  --accent-text: light-dark(#ffffff, #0f0f12);
+  --accent-soft: light-dark(#eef0ff, #1e1f3a);
+  --danger: light-dark(#dc2626, #f87171);
+  --warning: light-dark(#b45309, #fbbf24);
+  --success: light-dark(#15803d, #4ade80);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --color-surface: var(--surface);
+  --color-raised: var(--surface-raised);
+  --color-sunken: var(--surface-sunken);
+  --color-line: var(--border);
+  --color-fg: var(--text);
+  --color-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+}
+
+@layer base {
+  html {
+    @apply bg-surface text-fg font-sans antialiased;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+
+    /* A looping animation shortened to 0.01ms races instead of stopping. */
+    .animate-spin,
+    .indeterminate {
+      animation-duration: 1.5s !important;
+    }
+  }
+}
+
+@utility checkerboard {
+  background-color: var(--surface-raised);
+  background-image: conic-gradient(
+    var(--surface-sunken) 25%,
+    transparent 0 50%,
+    var(--surface-sunken) 0 75%,
+    transparent 0
+  );
+  background-size: 12px 12px;
+}
+
+@utility icon-button {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  color: var(--text-muted);
+  transition:
+    color 150ms,
+    background-color 150ms;
+  &:hover {
+    background-color: var(--surface-sunken);
+    color: var(--text);
+  }
+}
+
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+@utility indeterminate {
+  animation: indeterminate 1.2s ease-in-out infinite;
+}

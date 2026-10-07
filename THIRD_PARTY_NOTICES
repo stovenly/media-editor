@@ -1,0 +1,31 @@
+Third-party software shipped in the built application.
+
+Each entry gives the component, its licence, and where its source is
+available. WebAssembly engines are copied unmodified from the pinned npm
+packages listed in package-lock.json (see scripts/vendor-wasm.mjs).
+
+--------------------------------------------------------------------------------
+Svelte                          MIT          https://github.com/sveltejs/svelte
+Bits UI                         MIT          https://github.com/huntabyte/bits-ui
+Lucide icons                    ISC          https://github.com/lucide-icons/lucide
+Comlink                         Apache-2.0   https://github.com/GoogleChromeLabs/comlink
+Inter (typeface)                OFL-1.1      https://github.com/rsms/inter
+Tailwind CSS (generated CSS)    MIT          https://github.com/tailwindlabs/tailwindcss
+file-type                       MIT          https://github.com/sindresorhus/file-type
+ExifReader                      MPL-2.0      https://github.com/mattiasw/ExifReader
+client-zip                      MIT          https://github.com/Touffy/client-zip
+Mediabunny and its encoder
+  extensions (MP3, AAC, FLAC)   MPL-2.0      https://github.com/Vanilagy/mediabunny
+    The extensions include LAME (LGPL-2.0) and parts of FFmpeg (LGPL-2.1).
+wasm-vips                       MIT          https://github.com/kleisauke/wasm-vips
+    Includes libvips (LGPL-2.1), libjpeg-turbo, libpng, libwebp, libheif
+    (LGPL-3.0), libaom, libjxl, libtiff, lcms2, resvg, libimagequant
+    (GPL-3.0), cgif and their dependencies, under their own licences.
+magick-wasm                     Apache-2.0   https://github.com/dlemstra/magick-wasm
+    Includes ImageMagick (ImageMagick licence), LibRaw (LGPL-2.1),
+    libheif, libde265 (LGPL-3.0), OpenJPEG, OpenEXR and their dependencies.
+FFmpeg (ffmpeg.wasm core)       GPL-2.0+     https://github.com/ffmpegwasm/ffmpeg.wasm
+    Built with x264, x265, libvpx, LAME, libvorbis, libopus, libtheora,
+    libwebp, freetype, fribidi, libass and zimg.
+gifski-wasm                     AGPL-3.0+    https://github.com/jamsinclair/gifski-wasm
+--------------------------------------------------------------------------------

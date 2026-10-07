@@ -203,6 +203,10 @@ frame-ancestors 'none';
 base-uri 'none';
 ```
 
+- Worker scripts get the same policy plus `'unsafe-eval'` in `script-src`:
+  wasm-vips uses Embind, which generates its bindings with `new Function`.
+  The service worker and the preview server pick the policy per request
+  (`Sec-Fetch-Dest: worker`); the document's policy is unchanged.
 - `style-src-attr 'unsafe-inline'` covers inline `style` attributes from Svelte
   templates and Bits UI. Drop it if the e2e suite passes without it.
 - `connect-src 'self'` blocks `fetch(blob:)`, so WASM loads from same-origin
