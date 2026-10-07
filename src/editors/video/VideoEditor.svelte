@@ -54,13 +54,17 @@
     type TimedRedaction,
     type VideoProject,
   } from '../../project/video';
+  import { saveProject } from '../../project/save';
+  import ProjectMenu from '../../project/ProjectMenu.svelte';
+  import type { Restore } from '../editing.svelte';
   import RedactOverlay from '../image/RedactOverlay.svelte';
   import CaptionsPanel from './CaptionsPanel.svelte';
   import { VideoSession } from './session.svelte';
   import TextPanel from './TextPanel.svelte';
   import VideoTimeline, { type MovableRow } from './VideoTimeline.svelte';
 
-  let { item, onClose }: { item: FileItem; onClose: () => void } = $props();
+  let { item, restore, onClose }: { item: FileItem; restore?: Restore; onClose: () => void } =
+    $props();
 
   const session = new VideoSession();
   const history = new History<VideoProject | null>(null);
@@ -99,14 +103,36 @@
   const selectedRedaction = $derived(project?.redactions.find((r) => r.id === selected) ?? null);
   const selectedText = $derived(project?.texts.find((t) => t.id === selected) ?? null);
 
-  // svelte-ignore state_referenced_locally
-  session.add(item).then(
-    (asset) => {
-      const start = newVideoProject(asset.hasVideo ? asset : undefined);
-      history.reset(asset.kind === 'audio' ? addMusic(start, asset, 0) : appendMain(start, asset));
-    },
-    () => {},
-  );
+  let projectMenu = $state<ReturnType<typeof ProjectMenu>>();
+
+  async function start() {
+    if (restore?.kind === 'video') {
+      for (const source of restore.items) await session.add(source);
+      for (const font of restore.project.fonts) {
+        const file = restore.fonts.get(font.id);
+        if (file) await session.restoreFont(font, file).catch(() => {});
+      }
+      history.reset(restore.project);
+      return;
+    }
+    const asset = await session.add(item);
+    const fresh = newVideoProject(asset.hasVideo ? asset : undefined);
+    history.reset(asset.kind === 'audio' ? addMusic(fresh, asset, 0) : appendMain(fresh, asset));
+  }
+  start().catch(() => {});
+
+  async function save(bundle: boolean) {
+    if (!project) return;
+    const ids = new Set(
+      [...project.main, ...project.overlay, ...project.music].map((c) => c.assetId),
+    );
+    const items = files.items.filter((i) => ids.has(i.id));
+    const fonts = project.fonts.flatMap((font) => {
+      const file = session.fontFiles.get(font.id);
+      return file ? [{ font, file }] : [];
+    });
+    await saveProject(item.file.name, { kind: 'video', project }, items, { bundle, fonts });
+  }
 
   $effect(() => () => session.close());
 
@@ -299,8 +325,13 @@
   }
 
   function keydown(event: KeyboardEvent) {
-    if ((event.target as HTMLElement).closest('input, select, textarea')) return;
     const mod = event.ctrlKey || event.metaKey;
+    if (mod && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      void projectMenu?.save(false);
+      return;
+    }
+    if ((event.target as HTMLElement).closest('input, select, textarea')) return;
     if (event.key === ' ') {
       event.preventDefault();
       void togglePlay();
@@ -361,6 +392,7 @@
           disabled={!history.canRedo}
           onclick={() => history.redo()}><Redo2 size={16} /></button
         >
+        {#if project}<ProjectMenu bind:this={projectMenu} onSave={save} />{/if}
         <Dialog.Close class="rounded-full px-3 py-1.5 text-sm text-muted hover:text-fg"
           >Close</Dialog.Close
         >

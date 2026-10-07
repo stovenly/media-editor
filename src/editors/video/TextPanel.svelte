@@ -19,7 +19,7 @@
   const field = 'w-full min-w-0 rounded-lg border border-line bg-surface px-2 py-1 text-sm';
 </script>
 
-<section class="space-y-2">
+<section class="space-y-2" aria-label="Text clip">
   <h3 class="inline-flex items-center gap-1.5 font-medium"><Type size={14} /> Text</h3>
   <textarea
     class="{field} min-h-16"

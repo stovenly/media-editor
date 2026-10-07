@@ -39,11 +39,15 @@
   } from '../../project/audio';
   import { DEFAULT_OPTIONS } from '../../converter/options';
   import { outputName, startJob } from '../../converter/run';
+  import { saveProject } from '../../project/save';
+  import ProjectMenu from '../../project/ProjectMenu.svelte';
+  import type { Restore } from '../editing.svelte';
   import { audioFileFor } from './prepare';
   import { AudioSession } from './session.svelte';
   import Timeline, { type Selection } from './Timeline.svelte';
 
-  let { item, onClose }: { item: FileItem; onClose: () => void } = $props();
+  let { item, restore, onClose }: { item: FileItem; restore?: Restore; onClose: () => void } =
+    $props();
 
   const AUDIO_TARGETS = TARGETS.filter((t) => t.group === 'audio');
   const session = new AudioSession();
@@ -85,11 +89,24 @@
     }
   }
 
-  // svelte-ignore state_referenced_locally
-  load(item).then(
-    (info) => history.reset(newProject([info])),
-    (error: unknown) => (session.error = messageOf(error)),
-  );
+  let projectMenu = $state<ReturnType<typeof ProjectMenu>>();
+
+  async function start() {
+    if (restore?.kind === 'audio') {
+      for (const source of restore.items) await load(source);
+      history.reset(restore.project);
+    } else {
+      history.reset(newProject([await load(item)]));
+    }
+  }
+  start().catch((error: unknown) => (session.error = messageOf(error)));
+
+  async function save(bundle: boolean) {
+    if (!project) return;
+    const ids = new Set(project.tracks.flatMap((t) => t.clips.map((c) => c.assetId)));
+    const items = files.items.filter((i) => ids.has(i.id));
+    await saveProject(item.file.name, { kind: 'audio', project }, items, { bundle });
+  }
 
   $effect(() => () => session.close());
 
@@ -221,8 +238,13 @@
   }
 
   function keydown(event: KeyboardEvent) {
-    if ((event.target as HTMLElement).closest('input, select, textarea')) return;
     const mod = event.ctrlKey || event.metaKey;
+    if (mod && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      void projectMenu?.save(false);
+      return;
+    }
+    if ((event.target as HTMLElement).closest('input, select, textarea')) return;
     if (event.key === ' ') {
       event.preventDefault();
       togglePlay();
@@ -271,6 +293,7 @@
           disabled={!history.canRedo}
           onclick={() => history.redo()}><Redo2 size={16} /></button
         >
+        {#if project}<ProjectMenu bind:this={projectMenu} onSave={save} />{/if}
         <Dialog.Close class="rounded-full px-3 py-1.5 text-sm text-muted hover:text-fg"
           >Close</Dialog.Close
         >
@@ -390,11 +413,13 @@
                     <button
                       type="button"
                       class="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-xs"
+                      aria-label="Join {other.file.name} at the end"
                       onclick={() => add(other, 'append')}><Plus size={12} /> Join at end</button
                     >
                     <button
                       type="button"
                       class="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-xs"
+                      aria-label="Add {other.file.name} on a new track at the playhead"
                       onclick={() => add(other, 'track')}
                       ><Plus size={12} /> New track at playhead</button
                     >

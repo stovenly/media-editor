@@ -50,8 +50,8 @@ class Files {
   private estimating = new Map<string, Job>();
   private estimateTimer: ReturnType<typeof setTimeout> | undefined;
 
-  add(files: File[]): void {
-    if (files.length === 0) return;
+  add(files: File[]): FileItem[] {
+    if (files.length === 0) return [];
     const added = files.map((file): FileItem => ({
       id: `file-${++nextId}`,
       file,
@@ -63,6 +63,7 @@ class Files {
     }));
     this.items = [...this.items, ...added];
     for (const item of added) this.inspect(item);
+    return added;
   }
 
   remove(id: string): void {

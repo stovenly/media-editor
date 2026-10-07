@@ -3,7 +3,9 @@
   import { formatBytes } from '../app/format';
   import VirtualList from '../app/ui/VirtualList.svelte';
   import { scheduler, zipPool } from '../engine';
+  import { editing } from '../editors/editing.svelte';
   import { downloadBlob } from '../io/download';
+  import { projects } from '../project/open.svelte';
   import { combine } from './combine.svelte';
   import CombinePanel from './CombinePanel.svelte';
   import DetailsDialog from './DetailsDialog.svelte';
@@ -17,7 +19,7 @@
   import { subtitleAdder } from './subtitles.svelte';
   import SubtitlePanel from './SubtitlePanel.svelte';
 
-  const add = (picked: File[]) => files.add(picked);
+  const add = (picked: File[]) => projects.intake(picked);
   const count = $derived(files.items.length);
   const ready = $derived(files.items.filter((item) => item.status === 'ready').length);
   const pending = $derived(files.pending());
@@ -47,7 +49,6 @@
   });
 
   let details = $state<FileItem | null>(null);
-  let editing = $state<FileItem | null>(null);
   const detailsItem = $derived(
     details ? (files.items.find((item) => item.id === details!.id) ?? null) : null,
   );
@@ -103,7 +104,7 @@
     <VirtualList items={files.items} key={(item: FileItem) => item.id} rowHeight={84}>
       {#snippet row(item: FileItem)}
         <div class="h-[76px]">
-          <FileCard {item} onDetails={() => (details = item)} onEdit={() => (editing = item)} />
+          <FileCard {item} onDetails={() => (details = item)} onEdit={() => editing.open(item)} />
         </div>
       {/snippet}
     </VirtualList>
@@ -150,11 +151,22 @@
 
 <DetailsDialog item={detailsItem} onClose={() => (details = null)} />
 
-{#if editing}
-  {@const kind = editing.inspection?.sniffed.kind}
-  {#key editing.id}
-    {#await kind === 'audio' ? import('../editors/audio/AudioEditor.svelte') : kind === 'video' ? import('../editors/video/VideoEditor.svelte') : import('../editors/image/ImageEditor.svelte') then { default: Editor }}
-      <Editor item={editing} onClose={() => (editing = null)} />
-    {/await}
+{#if editing.current}
+  {@const { item, restore } = editing.current}
+  {@const kind = item.inspection?.sniffed.kind}
+  {#key item.id}
+    {#if kind === 'audio'}
+      {#await import('../editors/audio/AudioEditor.svelte') then { default: Editor }}
+        <Editor {item} {restore} onClose={() => editing.close()} />
+      {/await}
+    {:else if kind === 'video'}
+      {#await import('../editors/video/VideoEditor.svelte') then { default: Editor }}
+        <Editor {item} {restore} onClose={() => editing.close()} />
+      {/await}
+    {:else}
+      {#await import('../editors/image/ImageEditor.svelte') then { default: Editor }}
+        <Editor {item} onClose={() => editing.close()} />
+      {/await}
+    {/if}
   {/key}
 {/if}

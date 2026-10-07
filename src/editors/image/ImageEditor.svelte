@@ -30,6 +30,8 @@
     type Rect,
     type Redaction,
   } from '../../project/image-edit';
+  import { saveProject } from '../../project/save';
+  import ProjectMenu from '../../project/ProjectMenu.svelte';
   import CropOverlay from './CropOverlay.svelte';
   import RedactOverlay from './RedactOverlay.svelte';
   import { EditorSession } from './session.svelte';
@@ -188,8 +190,19 @@
     onClose();
   }
 
+  let projectMenu = $state<ReturnType<typeof ProjectMenu>>();
+
+  function save(bundle: boolean) {
+    return saveProject(item.file.name, { kind: 'image', edit }, [item], { bundle });
+  }
+
   function keydown(event: KeyboardEvent) {
     const mod = event.ctrlKey || event.metaKey;
+    if (mod && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      void projectMenu?.save(false);
+      return;
+    }
     if (mod && event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) history.redo();
@@ -261,6 +274,7 @@
           disabled={isEmptyEdit(edit)}
           onclick={() => history.apply('Reset', EMPTY_EDIT)}>Reset</button
         >
+        <ProjectMenu bind:this={projectMenu} onSave={save} />
         <Dialog.Close class="rounded-full px-3 py-1.5 text-sm text-muted hover:text-fg"
           >Cancel</Dialog.Close
         >
