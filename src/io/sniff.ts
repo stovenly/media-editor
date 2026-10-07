@@ -1,4 +1,5 @@
 import { fileTypeFromBlob } from 'file-type';
+import { detectSubtitles } from '../captions/cues';
 import { FORMATS, type MediaKind } from './formats';
 
 export type Sniffed = {
@@ -36,6 +37,9 @@ const SIGNATURES: Signature[] = [
   { format: 'nut', test: (_, t) => t.startsWith('nut/multimedia container') },
   { format: 'au', test: (_, t) => t.startsWith('.snd') },
   { format: 'svg', test: (_, t) => isSvg(t) },
+  { format: 'srt', test: (_, t) => detectSubtitles(t) === 'srt' },
+  { format: 'vtt', test: (_, t) => detectSubtitles(t) === 'vtt' },
+  { format: 'ass', test: (_, t) => detectSubtitles(t) === 'ass' },
 ];
 
 // Formats with no usable signature, trusted by extension alone.
@@ -79,7 +83,6 @@ const NOT_YET: Record<string, string> = {
   s3m: 'Tracker module',
   xm: 'Tracker module',
   xcf: 'GIMP image',
-  vtt: 'Subtitles',
 };
 
 function isSvg(text: string): boolean {

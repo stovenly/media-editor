@@ -1,3 +1,7 @@
+<script lang="ts" module>
+  export type MovableRow = 'overlay' | 'text' | 'cue' | 'music';
+</script>
+
 <script lang="ts">
   import { layout, videoDuration, type VideoAsset, type VideoProject } from '../../project/video';
 
@@ -10,8 +14,7 @@
     onSeek,
     onSelect,
     onReorder,
-    onMoveOverlay,
-    onMoveMusic,
+    onMove,
   }: {
     project: VideoProject;
     assets: ReadonlyMap<string, VideoAsset>;
@@ -21,13 +24,12 @@
     onSeek: (time: number) => void;
     onSelect: (id: string | null) => void;
     onReorder: (id: string, index: number) => void;
-    onMoveOverlay: (id: string, start: number) => void;
-    onMoveMusic: (id: string, start: number) => void;
+    onMove: (row: MovableRow, id: string, start: number) => void;
   } = $props();
 
   const RULER = 22;
-  const ROW = 52;
-  const ROWS = ['Video', 'Overlay', 'Music'] as const;
+  const ROW = 44;
+  const ROWS = ['Video', 'Overlay', 'Text', 'Captions', 'Music'] as const;
   const HEIGHT = RULER + ROWS.length * ROW + 4;
   const LABEL = 64;
 
@@ -71,9 +73,23 @@
         end: o.start + (o.out - o.in),
         label: name(o.assetId),
       })),
+      ...project.texts.map((t) => ({
+        id: t.id,
+        row: 2,
+        start: t.start,
+        end: t.start + t.duration,
+        label: t.text.split('\n')[0] ?? '',
+      })),
+      ...project.captions.cues.map((c) => ({
+        id: c.id,
+        row: 3,
+        start: c.start,
+        end: c.end,
+        label: c.text.split('\n')[0] ?? '',
+      })),
       ...project.music.map((m) => ({
         id: m.id,
-        row: 2,
+        row: 4,
         start: m.start,
         end: m.start + (m.out - m.in),
         label: name(m.assetId),
@@ -113,7 +129,7 @@
       g.fillStyle = v('--text-muted');
       g.fillText(label, 8, top + ROW / 2 + 4);
     });
-    const colours = [v('--accent'), '#0ea5e9', '#22c55e'];
+    const colours = [v('--accent'), '#0ea5e9', '#d946ef', '#f59e0b', '#16a34a'];
     for (const b of blocks) {
       const left = Math.max(LABEL, x(b.start));
       const right = x(b.end);
@@ -135,14 +151,15 @@
       g.rect(left, top, Math.max(0, right - left - 6), ROW - 10);
       g.clip();
       g.fillStyle = '#ffffff';
-      g.fillText(b.label, left + 6, top + 16);
-      g.fillText(`${(b.end - b.start).toFixed(1)} s`, left + 6, top + 30);
+      g.fillText(b.label, left + 6, top + 14);
+      g.fillText(`${(b.end - b.start).toFixed(1)} s`, left + 6, top + 28);
       g.restore();
     }
     g.fillStyle = v('--danger');
     if (x(position) >= LABEL) g.fillRect(Math.round(x(position)) - 1, 0, 2, HEIGHT);
   });
 
+  const MOVABLE: (MovableRow | undefined)[] = [undefined, 'overlay', 'text', 'cue', 'music'];
   let drag: { block: Block; grab: number; moved: boolean } | null = null;
 
   function locate(event: PointerEvent) {
@@ -177,8 +194,8 @@
     if (!drag) return;
     const { time } = locate(event);
     drag.moved = true;
-    if (drag.block.row === 1) onMoveOverlay(drag.block.id, Math.max(0, time - drag.grab));
-    if (drag.block.row === 2) onMoveMusic(drag.block.id, Math.max(0, time - drag.grab));
+    const row = MOVABLE[drag.block.row];
+    if (row) onMove(row, drag.block.id, Math.max(0, time - drag.grab));
   }
 
   function up(event: PointerEvent) {
@@ -202,7 +219,7 @@
     style:width="{LABEL + duration * pps}px"
     style:height="{HEIGHT}px"
     role="application"
-    aria-label="Video timeline. Click to move the playhead, drag clips to reorder or move them."
+    aria-label="Video timeline. Click to move the playhead, drag clips to reorder or move them. Arrow keys step through frames."
     onpointerdown={down}
     onpointermove={move}
     onpointerup={up}

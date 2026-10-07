@@ -1,5 +1,7 @@
 <script lang="ts">
   import {
+    Camera,
+    Captions as CaptionsIcon,
     ChevronLeft,
     ChevronRight,
     Download,
@@ -18,6 +20,7 @@
     Scissors,
     SquareDashed,
     Trash2,
+    Type,
     Undo2,
   } from '@lucide/svelte';
   import { Dialog } from 'bits-ui';
@@ -33,23 +36,29 @@
   import {
     addMusic,
     addOverlay,
+    addText,
     appendMain,
     ASPECTS,
     moveMain,
     newVideoProject,
     removeAny,
     splitMain,
+    updateCaptions,
+    updateCue,
     updateMain,
     updateMusic,
     updateOverlay,
+    updateText,
     videoDuration,
     type MainClip,
     type TimedRedaction,
     type VideoProject,
   } from '../../project/video';
   import RedactOverlay from '../image/RedactOverlay.svelte';
+  import CaptionsPanel from './CaptionsPanel.svelte';
   import { VideoSession } from './session.svelte';
-  import VideoTimeline from './VideoTimeline.svelte';
+  import TextPanel from './TextPanel.svelte';
+  import VideoTimeline, { type MovableRow } from './VideoTimeline.svelte';
 
   let { item, onClose }: { item: FileItem; onClose: () => void } = $props();
 
@@ -68,7 +77,8 @@
   let exportFormat = $state<'mp4' | 'webm'>('mp4');
   let exportQuality = $state(82);
   let exportMb = $state<number | null>(null);
-  let exporting = $state<string | null>(null);
+  let exporting = $state<{ jobId: string; stage: string } | null>(null);
+  let captionsPanel = $state<ReturnType<typeof CaptionsPanel>>();
   let exportError = $state<string | null>(null);
   let exported = $state<{ blob: Blob; name: string; notes: string[] } | null>(null);
 
@@ -78,7 +88,8 @@
         i.status === 'ready' &&
         (i.inspection?.sniffed.kind === 'image' ||
           i.inspection?.sniffed.kind === 'video' ||
-          i.inspection?.sniffed.kind === 'audio'),
+          i.inspection?.sniffed.kind === 'audio' ||
+          i.inspection?.sniffed.kind === 'subtitle'),
     ),
   );
   const duration = $derived(project ? videoDuration(project) : 0);
@@ -86,6 +97,7 @@
   const selectedOverlay = $derived(project?.overlay.find((c) => c.id === selected) ?? null);
   const selectedMusic = $derived(project?.music.find((c) => c.id === selected) ?? null);
   const selectedRedaction = $derived(project?.redactions.find((r) => r.id === selected) ?? null);
+  const selectedText = $derived(project?.texts.find((t) => t.id === selected) ?? null);
 
   // svelte-ignore state_referenced_locally
   session.add(item).then(
@@ -168,6 +180,46 @@
     apply('Aspect', { ...project, width, height });
   }
 
+  async function saveFrame() {
+    if (!project) return;
+    try {
+      const png = await session.snapshot(project, position);
+      const stem = item.file.name.replace(/\.[^.]+$/, '');
+      downloadBlob(png, `${stem}-${position.toFixed(2).replace('.', '_')}s.png`);
+    } catch (error) {
+      session.error = messageOf(error);
+    }
+  }
+
+  function insertText() {
+    if (!project) return;
+    const next = addText(project, position);
+    apply('Add text', next);
+    selected = next.texts.at(-1)!.id;
+  }
+
+  function move(row: MovableRow, id: string, start: number) {
+    if (!project) return;
+    if (row === 'overlay') apply('Move overlay', updateOverlay(project, id, { start }));
+    else if (row === 'music') apply('Move music', updateMusic(project, id, { start }));
+    else if (row === 'text') apply('Move text', updateText(project, id, { start }));
+    else {
+      const cue = project.captions.cues.find((c) => c.id === id);
+      if (cue)
+        apply('Move caption', updateCue(project, id, { start, end: start + cue.end - cue.start }));
+    }
+  }
+
+  async function addFont(file: File): Promise<string | null> {
+    if (!history.state) return null;
+    const font = await session.addFont(
+      file,
+      history.state.fonts.map((f) => f.family),
+    );
+    apply('Add font', { ...history.state, fonts: [...history.state.fonts, font] });
+    return font.family;
+  }
+
   function patchMain(label: string, patch: Partial<MainClip>) {
     if (project && selectedMain) apply(label, updateMain(project, selectedMain.id, patch));
   }
@@ -229,7 +281,7 @@
           targetBytes: exportMb ? exportMb * 1_000_000 : null,
           codec: null,
         },
-        (jobId) => (exporting = jobId),
+        (jobId, stage) => (exporting = { jobId, stage }),
       );
       const stem = item.file.name.replace(/\.[^.]+$/, '');
       exported = {
@@ -259,6 +311,8 @@
     } else if (mod && event.key.toLowerCase() === 'y') {
       event.preventDefault();
       history.redo();
+    } else if (event.key.toLowerCase() === 't' && !mod && project) {
+      insertText();
     } else if (event.key.toLowerCase() === 's' && !mod && project) {
       apply('Split', splitMain(project, position));
     } else if ((event.key === 'Delete' || event.key === 'Backspace') && selected && project) {
@@ -325,7 +379,7 @@
               <div class="rounded-xl border border-line p-2">
                 <p class="truncate" title={source.file.name}>{source.file.name}</p>
                 <div class="mt-1.5 flex flex-wrap gap-1">
-                  {#if kind !== 'audio'}
+                  {#if kind === 'image' || kind === 'video'}
                     <button
                       type="button"
                       class="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs"
@@ -340,7 +394,15 @@
                       ><Layers size={11} /> Overlay</button
                     >
                   {/if}
-                  {#if kind !== 'image'}
+                  {#if kind === 'subtitle'}
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs"
+                      aria-label="Add {source.file.name} as captions"
+                      onclick={() => captionsPanel?.importFile(source.file)}
+                      ><CaptionsIcon size={11} /> Captions</button
+                    >
+                  {:else if kind !== 'image'}
                     <button
                       type="button"
                       class="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs"
@@ -427,12 +489,24 @@
               >
               <button
                 type="button"
+                class="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-sm"
+                title="Add text at the playhead (T)"
+                onclick={insertText}><Type size={14} /> Text</button
+              >
+              <button
+                type="button"
                 class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm {drawingRedaction
                   ? 'border-accent text-accent'
                   : 'border-line'}"
                 aria-pressed={drawingRedaction}
                 onclick={() => (drawingRedaction = !drawingRedaction)}
                 ><SquareDashed size={14} /> Redact an area</button
+              >
+              <button
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-sm"
+                title="Save the frame at the playhead as a PNG"
+                onclick={saveFrame}><Camera size={14} /> Save frame</button
               >
               <label class="ml-auto inline-flex items-center gap-2 text-xs text-muted"
                 >Zoom <input
@@ -448,6 +522,9 @@
                 Drag over the preview. The area is covered for 3 seconds from the playhead; change
                 the times in the panel.
               </p>{/if}
+            {#if session.error && project}<p class="text-sm text-danger" role="alert">
+                {session.error}
+              </p>{/if}
 
             {#if project}
               <VideoTimeline
@@ -459,10 +536,7 @@
                 onSeek={seek}
                 onSelect={(id) => (selected = id)}
                 onReorder={(id, index) => apply('Reorder', moveMain(project, id, index))}
-                onMoveOverlay={(id, start) =>
-                  apply('Move overlay', updateOverlay(project, id, { start }))}
-                onMoveMusic={(id, start) =>
-                  apply('Move music', updateMusic(project, id, { start }))}
+                onMove={move}
               />
             {/if}
           </section>
@@ -834,6 +908,14 @@
                     >
                   </div>
                 </section>
+              {:else if selectedText}
+                <TextPanel
+                  clip={selectedText}
+                  fonts={project.fonts}
+                  onChange={(label, patch) =>
+                    apply(label, updateText(project, selectedText.id, patch))}
+                  onAddFont={addFont}
+                />
               {:else if selectedRedaction}
                 <section class="space-y-2">
                   <h3 class="font-medium">Covered area</h3>
@@ -882,6 +964,19 @@
                   {/if}
                 </section>
               {/if}
+
+              <CaptionsPanel
+                bind:this={captionsPanel}
+                captions={project.captions}
+                {selected}
+                {position}
+                fonts={project.fonts}
+                name={item.file.name.replace(/\.[^.]+$/, '')}
+                onChange={(label, patch) => apply(label, updateCaptions(project, patch))}
+                onSelect={(id) => (selected = id)}
+                onSeek={seek}
+                onAddFont={addFont}
+              />
 
               {#if project.redactions.length}
                 <section class="space-y-1">
@@ -977,9 +1072,8 @@
                 {#if estimate}<p class="text-xs text-muted">About {formatBytes(estimate)}</p>{/if}
                 {#if exporting}
                   <p class="inline-flex items-center gap-2 text-muted">
-                    <LoaderCircle size={14} class="animate-spin" /> Exporting · {Math.round(
-                      (hub.latest.get(exporting) ?? 0) * 100,
-                    )}%
+                    <LoaderCircle size={14} class="animate-spin" />
+                    {exporting.stage} · {Math.round((hub.latest.get(exporting.jobId) ?? 0) * 100)}%
                   </p>
                 {:else}
                   <button

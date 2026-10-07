@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    Captions,
     CircleAlert,
     Download,
     File as FileIcon,
@@ -26,7 +27,7 @@
   let { item, onDetails, onEdit }: { item: FileItem; onDetails: () => void; onEdit: () => void } =
     $props();
 
-  const icons = { image: Image, audio: Music, video: Film };
+  const icons = { image: Image, audio: Music, video: Film, subtitle: Captions };
   const kind = $derived(item.inspection?.sniffed.kind ?? null);
   const Icon = $derived(kind ? icons[kind] : FileIcon);
   const targetId = $derived(files.targetOf(item));
@@ -65,6 +66,11 @@
     const parts = [i.sniffed.label];
     if (i.width && i.height) parts.push(`${i.width}×${i.height}`);
     if (i.pages > 1) parts.push(`${i.pages} frames`);
+    if (i.cues !== undefined) parts.push(`${i.cues} ${i.cues === 1 ? 'caption' : 'captions'}`);
+    if (i.av?.subtitles.length)
+      parts.push(
+        `${i.av.subtitles.length} subtitle ${i.av.subtitles.length === 1 ? 'track' : 'tracks'}`,
+      );
     if (i.duration) parts.push(formatDuration(i.duration));
     parts.push(formatBytes(item.file.size));
     return parts.join(' · ');

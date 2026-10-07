@@ -1,4 +1,5 @@
 // Everything the file card shows before conversion. Runs in the inspect worker.
+import { parseSubtitles, writeSubtitles, type Cue, type SubtitleFormat } from '../captions/cues';
 import { probeAv, type AvProbe } from '../media/probe';
 import { readMetadata, type MetadataSummary } from '../metadata/read';
 import { frameCount } from './frames';
@@ -15,16 +16,25 @@ export type Inspection = {
   metadata?: MetadataSummary;
   av?: AvProbe;
   motionOffset?: number; // byte offset of the MP4 embedded in a Motion Photo
+  cues?: number;
 };
 
 const THUMB = 96;
 const AUDIO_CAPABLE = new Set(['mp4', 'm4v', 'mov', 'webm', 'mkv', '3gp']);
 const METADATA_LIMIT = 256 * 1024 * 1024;
+const SUBTITLE_LIMIT = 32 * 1024 * 1024;
 const BROWSER_DECODES = new Set(['jpeg', 'png', 'apng', 'gif', 'webp', 'avif', 'bmp', 'ico']);
 
 export async function inspect(file: File): Promise<Inspection> {
   const sniffed = await sniff(file);
   const result: Inspection = { sniffed, pages: 1 };
+  if (sniffed.kind === 'subtitle') {
+    if (file.size > SUBTITLE_LIMIT) throw new Error('This subtitle file is too large');
+    const cues = parseSubtitles(await file.text(), sniffed.format as SubtitleFormat);
+    result.cues = cues.length;
+    result.duration = cues.reduce((end, cue) => Math.max(end, cue.end), 0);
+    return result;
+  }
   if (sniffed.kind === 'audio' || sniffed.kind === 'video') {
     const probed = await probeAv(file, THUMB);
     if (!probed) return result;
@@ -90,6 +100,15 @@ async function browserThumbnail(file: File) {
   }
   const thumbnail = await canvas.convertToBlob({ type: 'image/png' });
   return { width, height, alpha, thumbnail };
+}
+
+export async function readCues(file: File): Promise<Cue[]> {
+  if (file.size > SUBTITLE_LIMIT) throw new Error('This subtitle file is too large');
+  return parseSubtitles(await file.text());
+}
+
+export async function convertSubtitles(file: File, to: SubtitleFormat): Promise<string> {
+  return writeSubtitles(parseSubtitles(await file.text()), to);
 }
 
 // The MP4 a Motion Photo appends after its JPEG: the first plausible `ftyp` box past the image data.

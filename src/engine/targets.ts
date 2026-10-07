@@ -1,6 +1,6 @@
 import type { MediaKind } from '../io/formats';
 
-export type TargetGroup = 'image' | 'animated' | 'icon' | 'video' | 'audio';
+export type TargetGroup = 'image' | 'animated' | 'icon' | 'video' | 'audio' | 'subtitle';
 
 export type Target = {
   id: string;
@@ -11,14 +11,15 @@ export type Target = {
   alpha: boolean;
   from: readonly MediaKind[];
   hint?: string;
-  requires?: 'animated' | 'motion';
+  requires?: 'animated' | 'motion' | 'subtitles';
 };
 
-export type Facts = { animated?: boolean; motion?: boolean };
+export type Facts = { animated?: boolean; motion?: boolean; subtitles?: boolean };
 
 const IMAGE: readonly MediaKind[] = ['image'];
 const VISUAL: readonly MediaKind[] = ['image', 'video'];
 const AV: readonly MediaKind[] = ['audio', 'video'];
+const TEXT: readonly MediaKind[] = ['subtitle', 'video'];
 
 export const TARGETS: readonly Target[] = [
   {
@@ -458,6 +459,39 @@ export const TARGETS: readonly Target[] = [
     from: AV,
   },
   { id: 'au', group: 'audio', label: 'AU', ext: 'au', mime: 'audio/basic', alpha: false, from: AV },
+  {
+    id: 'srt',
+    group: 'subtitle',
+    label: 'SRT',
+    ext: 'srt',
+    mime: 'application/x-subrip',
+    alpha: false,
+    from: TEXT,
+    hint: 'Works with almost every player',
+    requires: 'subtitles',
+  },
+  {
+    id: 'vtt',
+    group: 'subtitle',
+    label: 'WebVTT',
+    ext: 'vtt',
+    mime: 'text/vtt',
+    alpha: false,
+    from: TEXT,
+    hint: 'For web video',
+    requires: 'subtitles',
+  },
+  {
+    id: 'ass',
+    group: 'subtitle',
+    label: 'ASS',
+    ext: 'ass',
+    mime: 'text/x-ssa',
+    alpha: false,
+    from: TEXT,
+    hint: 'For subtitle editors such as Aegisub',
+    requires: 'subtitles',
+  },
 ];
 
 export const GROUP_LABELS: Record<TargetGroup, string> = {
@@ -466,6 +500,7 @@ export const GROUP_LABELS: Record<TargetGroup, string> = {
   icon: 'Icon',
   video: 'Video',
   audio: 'Audio',
+  subtitle: 'Subtitles',
 };
 
 const BY_ID = new Map(TARGETS.map((target) => [target.id, target]));
@@ -497,12 +532,16 @@ const SUGGESTIONS: Record<string, readonly string[]> = {
   webm: ['mp4', 'gif-anim', 'mp3'],
   avi: ['mp4', 'webm', 'mp3'],
   wmv: ['mp4', 'webm', 'mp3'],
+  srt: ['vtt', 'ass'],
+  vtt: ['srt', 'ass'],
+  ass: ['srt', 'vtt'],
 };
 
 const BY_KIND: Record<MediaKind, readonly string[]> = {
   image: ['jpeg', 'png', 'webp', 'avif'],
   audio: ['mp3', 'm4a', 'wav', 'flac'],
   video: ['mp4', 'webm', 'gif-anim', 'mp3'],
+  subtitle: ['srt', 'vtt', 'ass'],
 };
 
 export function suggestions(format: string, kind: MediaKind, facts: Facts = {}): Target[] {

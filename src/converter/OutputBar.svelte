@@ -8,12 +8,13 @@
     image: 'Images',
     video: 'Videos',
     audio: 'Audio',
+    subtitle: 'Subtitles',
   };
 
   const rows = $derived(
     files.kinds().map((kind) => {
       const counts = new Map<string, number>();
-      const facts = { animated: false, motion: false };
+      const facts = { animated: false, motion: false, subtitles: false };
       for (const item of files.items) {
         const format = item.inspection?.sniffed.format;
         if (item.inspection?.sniffed.kind !== kind || !format) continue;
@@ -21,6 +22,7 @@
         const f = factsOf(item.inspection);
         facts.animated ||= Boolean(f.animated);
         facts.motion ||= Boolean(f.motion);
+        facts.subtitles ||= Boolean(f.subtitles);
       }
       const common = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
       const chips = suggestions(common, kind, facts);

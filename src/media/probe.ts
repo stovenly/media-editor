@@ -1,5 +1,6 @@
 // Reads container, duration and tracks with Mediabunny, and grabs a thumbnail. Runs in a worker.
 import { ALL_FORMATS, BlobSource, CanvasSink, Input } from 'mediabunny';
+import { subtitleTracks, type SubtitleTrack } from './subtitles';
 
 export type AvProbe = {
   native: boolean;
@@ -21,6 +22,7 @@ export type AvProbe = {
     bitrate: number | null;
     decodable: boolean;
   };
+  subtitles: SubtitleTrack[];
   tags: { location: boolean; title: string | null; hasCover: boolean };
 };
 
@@ -39,6 +41,7 @@ export async function probeAv(
       native: true,
       container: format.name,
       duration,
+      subtitles: await subtitleTracks(file).catch(() => []),
       tags: { location: false, title: null, hasCover: false },
     };
     if (videoTrack) {

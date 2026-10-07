@@ -179,6 +179,13 @@ console.log(`Wrote fixtures to ${out}`);
 // Audio and video fixtures need a native ffmpeg; they are skipped without one.
 import { spawnSync } from 'node:child_process';
 
+write(
+  'captions.srt',
+  new TextEncoder().encode(
+    '1\n00:00:00,200 --> 00:00:00,900\nFirst caption\n\n2\n00:00:01,000 --> 00:00:01,800\nSecond, with\ntwo lines\n',
+  ),
+);
+
 const ffmpeg = (name, args) => {
   const result = spawnSync('ffmpeg', [
     '-hide_banner',
@@ -257,6 +264,34 @@ if (
   ffmpeg('tone.aiff', [...tone]);
   ffmpeg('tone.ac3', [...tone, '-c:a', 'ac3']);
   ffmpeg('tone.wma', [...tone, '-c:a', 'wmav2']);
+  const subs = join(out, 'captions.srt');
+  const withSubs = (name, codec, videoCodec, audioCodec) =>
+    ffmpeg(name, [
+      ...video,
+      ...tone,
+      '-i',
+      subs,
+      '-map',
+      '0:v',
+      '-map',
+      '1:a',
+      '-map',
+      '2:s',
+      '-c:v',
+      videoCodec,
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      audioCodec,
+      '-c:s',
+      codec,
+      '-metadata:s:s:0',
+      'language=eng',
+      '-shortest',
+    ]);
+  withSubs('subs.mp4', 'mov_text', 'libx264', 'aac');
+  withSubs('subs.mkv', 'srt', 'libx264', 'libopus');
+  withSubs('subs.webm', 'webvtt', 'libvpx-vp9', 'libopus');
 } else {
   console.warn('No ffmpeg on PATH: skipped audio and video fixtures');
 }

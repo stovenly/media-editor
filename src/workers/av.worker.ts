@@ -5,6 +5,8 @@ import {
   clipDuration,
   ffmpegArgs,
   slideshowJob,
+  subtitleMuxJob,
+  type SubtitleMux,
   type AvSettings,
   type Route,
   type Slideshow,
@@ -99,6 +101,27 @@ const api = {
         total,
         (fraction) => reportProgress(jobId, fraction),
         [{ path: '/list.txt', data: job.list }],
+      );
+      return Comlink.transfer(bytes, [bytes.buffer as ArrayBuffer]);
+    } catch (error) {
+      throw new Error(messageOf(error), { cause: error });
+    }
+  },
+  async muxSubtitles(
+    jobId: string,
+    ffmpegDir: string,
+    video: File,
+    subtitles: File,
+    mux: SubtitleMux,
+    duration: number | null,
+  ): Promise<Uint8Array> {
+    try {
+      const bytes = await runFfmpeg(
+        ffmpegDir,
+        [video, subtitles],
+        subtitleMuxJob({ ...mux, video: video.name, subtitles: subtitles.name }),
+        duration,
+        (fraction) => reportProgress(jobId, fraction),
       );
       return Comlink.transfer(bytes, [bytes.buffer as ArrayBuffer]);
     } catch (error) {

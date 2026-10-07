@@ -14,6 +14,8 @@
   import { files, type FileItem } from './files.svelte';
   import OptionsPanel from './OptionsPanel.svelte';
   import OutputBar from './OutputBar.svelte';
+  import { subtitleAdder } from './subtitles.svelte';
+  import SubtitlePanel from './SubtitlePanel.svelte';
 
   const add = (picked: File[]) => files.add(picked);
   const count = $derived(files.items.length);
@@ -91,6 +93,7 @@
       <OutputBar />
       <OptionsPanel />
       {#if combine.available()}<CombinePanel />{/if}
+      {#if subtitleAdder.available()}<SubtitlePanel />{/if}
     {/if}
 
     <EngineDownloads />

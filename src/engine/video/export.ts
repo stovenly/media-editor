@@ -16,7 +16,7 @@ import { renderMix } from '../audio/render';
 import type { AssetHandle } from '../audio/source';
 import { registerEncoders } from '../av/native';
 import { videoBitrate } from '../av/plan';
-import { Compositor, type FrameLookup } from './compositor';
+import { Compositor, type FontLoader, type FrameLookup } from './compositor';
 
 export type VideoExportSettings = {
   container: 'mp4' | 'webm';
@@ -33,6 +33,7 @@ export async function exportVideo(
   assets: ReadonlyMap<string, VideoAsset>,
   audio: ReadonlyMap<string, AssetHandle>,
   frames: FrameLookup,
+  fonts: FontLoader,
   settings: VideoExportSettings,
   onProgress: (fraction: number) => void,
 ): Promise<{ bytes: Uint8Array; notes: string[] }> {
@@ -73,7 +74,7 @@ export async function exportVideo(
 
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d', { alpha: false })!;
-  const compositor = new Compositor(ctx);
+  const compositor = new Compositor(ctx, fonts);
   const target = new BufferTarget();
   const output = new Output({
     format:

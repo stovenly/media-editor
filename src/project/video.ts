@@ -1,6 +1,8 @@
 // The video project: a main track played in order, an overlay track, a music track and timed redactions.
+import type { Cue } from '../captions/cues';
 import { newId } from './audio';
 import type { Rect } from './image-edit';
+import { NO_CAPTIONS, TITLE_STYLE, type Captions, type ProjectFont, type TextClip } from './text';
 
 export type AssetKind = 'video' | 'image' | 'audio';
 
@@ -77,6 +79,9 @@ export type VideoProject = {
   overlay: OverlayClip[];
   music: MusicClip[];
   redactions: TimedRedaction[];
+  texts: TextClip[];
+  captions: Captions;
+  fonts: ProjectFont[];
 };
 
 export const STILL_SECONDS = 3;
@@ -113,6 +118,8 @@ export function videoDuration(project: VideoProject): number {
   const placed = layout(project);
   let end = placed.at(-1)?.end ?? 0;
   for (const o of project.overlay) end = Math.max(end, o.start + (o.out - o.in));
+  for (const t of project.texts) end = Math.max(end, t.start + t.duration);
+  for (const c of project.captions.cues) end = Math.max(end, c.end);
   return end;
 }
 
@@ -130,6 +137,9 @@ export function newVideoProject(first: VideoAsset | undefined): VideoProject {
     overlay: [],
     music: [],
     redactions: [],
+    texts: [],
+    captions: NO_CAPTIONS,
+    fonts: [],
   };
 }
 
@@ -218,6 +228,50 @@ export function removeAny(project: VideoProject, id: string): VideoProject {
     overlay: project.overlay.filter((c) => c.id !== id),
     music: project.music.filter((c) => c.id !== id),
     redactions: project.redactions.filter((r) => r.id !== id),
+    texts: project.texts.filter((t) => t.id !== id),
+    captions: { ...project.captions, cues: project.captions.cues.filter((c) => c.id !== id) },
+  };
+}
+
+export function addText(project: VideoProject, start: number, text = 'Your text'): VideoProject {
+  const clip: TextClip = {
+    id: newId('text'),
+    text,
+    start,
+    duration: 3,
+    fadeIn: 0.3,
+    fadeOut: 0.3,
+    style: project.texts.at(-1)?.style ?? TITLE_STYLE,
+  };
+  return { ...project, texts: [...project.texts, clip] };
+}
+
+export function updateText(
+  project: VideoProject,
+  id: string,
+  patch: Partial<TextClip>,
+): VideoProject {
+  return { ...project, texts: project.texts.map((t) => (t.id === id ? { ...t, ...patch } : t)) };
+}
+
+export function updateCaptions(project: VideoProject, patch: Partial<Captions>): VideoProject {
+  return { ...project, captions: { ...project.captions, ...patch } };
+}
+
+export function updateCue(project: VideoProject, id: string, patch: Partial<Cue>): VideoProject {
+  const cues = project.captions.cues
+    .map((c) => (c.id === id ? { ...c, ...patch } : c))
+    .sort((a, b) => a.start - b.start);
+  return updateCaptions(project, { cues });
+}
+
+// Fills in fields added after a project was saved.
+export function normalizeVideoProject(project: VideoProject): VideoProject {
+  return {
+    ...project,
+    texts: project.texts ?? [],
+    captions: { ...NO_CAPTIONS, ...project.captions },
+    fonts: project.fonts ?? [],
   };
 }
 

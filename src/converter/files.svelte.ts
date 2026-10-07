@@ -42,6 +42,7 @@ class Files {
     image: null,
     audio: null,
     video: null,
+    subtitle: null,
   });
   options = $state.raw<ConvertOptions>(loadOptions());
 
@@ -80,7 +81,7 @@ class Files {
     for (const item of this.items)
       if (item.status === 'ready' && item.inspection?.sniffed.kind)
         kinds.add(item.inspection.sniffed.kind);
-    return (['image', 'video', 'audio'] as const).filter((kind) => kinds.has(kind));
+    return (['image', 'video', 'audio', 'subtitle'] as const).filter((kind) => kinds.has(kind));
   }
 
   targetOf(item: FileItem): string | null {
@@ -260,6 +261,7 @@ class Files {
       const targetId = this.targetOf(item);
       if (!key || !targetId || item.status !== 'ready' || !item.inspection) continue;
       if (item.estimate?.key === key) continue;
+      if (item.inspection.sniffed.kind === 'subtitle') continue;
       if (item.inspection.sniffed.kind !== 'image') {
         const probe = item.inspection.av;
         const bytes = probe ? estimateBytes(probe, avSettings(targetId, this.options)) : null;
@@ -360,7 +362,13 @@ function saveOptions(options: ConvertOptions): void {
 export const files = new Files();
 
 export function factsOf(inspection: Inspection | undefined): Facts {
-  return { animated: (inspection?.pages ?? 1) > 1, motion: inspection?.motionOffset !== undefined };
+  return {
+    animated: (inspection?.pages ?? 1) > 1,
+    motion: inspection?.motionOffset !== undefined,
+    subtitles:
+      inspection?.sniffed.kind === 'subtitle' ||
+      Boolean(inspection?.av?.subtitles.some((track) => track.text)),
+  };
 }
 
 export function targetLabel(id: string | null): string {

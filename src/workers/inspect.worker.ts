@@ -1,5 +1,5 @@
 import * as Comlink from 'comlink';
-import { inspect } from '../io/inspect';
+import { convertSubtitles, inspect, readCues } from '../io/inspect';
 import { attachProgress } from './progress';
 
 // Which video codecs WebCodecs can encode here. Probed off the main thread: Chrome blocks on it for tens of milliseconds.
@@ -26,6 +26,8 @@ async function encodableVideoCodecs(probes: Record<string, string>): Promise<str
 const api = {
   attach: attachProgress,
   inspect: (file: File) => inspect(file),
+  convertSubtitles,
+  readCues,
   encodableVideoCodecs,
 };
 

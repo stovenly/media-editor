@@ -1,4 +1,4 @@
-export type MediaKind = 'image' | 'audio' | 'video';
+export type MediaKind = 'image' | 'audio' | 'video' | 'subtitle';
 
 export type FormatInfo = {
   kind: MediaKind;
@@ -92,6 +92,10 @@ export const FORMATS: Record<string, FormatInfo> = {
   rm: { kind: 'video', label: 'RealMedia video' },
   ogv: { kind: 'video', label: 'Ogg video' },
   nut: { kind: 'video', label: 'NUT video' },
+
+  srt: { kind: 'subtitle', label: 'SRT subtitles' },
+  vtt: { kind: 'subtitle', label: 'WebVTT subtitles' },
+  ass: { kind: 'subtitle', label: 'ASS subtitles' },
 };
 
 export function formatInfo(format: string): FormatInfo | undefined {

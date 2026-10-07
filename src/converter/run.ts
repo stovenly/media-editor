@@ -1,5 +1,6 @@
 // Starts one conversion: picks the engine, makes sure it is downloaded, and submits it to the scheduler.
-import { avPool, imagePool, scheduler } from '../engine';
+import type { SubtitleFormat } from '../captions/cues';
+import { avPool, imagePool, inspectPool, scheduler } from '../engine';
 import { routeAv, type AvSettings, type Route } from '../engine/av/plan';
 import { downloads } from '../engine/downloads.svelte';
 import { planImage } from '../engine/image/router';
@@ -51,6 +52,21 @@ export function startJob(input: JobInput): Job {
       task = image;
       input.onTask(image.id);
       return image.result;
+    }
+    if (kind === 'subtitle' && out.group === 'subtitle') {
+      const converted = scheduler.submit({
+        pool: inspectPool,
+        memory: 64 * MB + input.file.size * 8,
+        run: (api) => api.convertSubtitles(input.file, out.id as SubtitleFormat),
+      });
+      task = converted;
+      input.onTask(converted.id);
+      const text = await converted.result;
+      return {
+        blob: new Blob([text], { type: `${out.mime};charset=utf-8` }),
+        name: outputName(input.file.name, out.ext),
+        notes: [],
+      };
     }
     if (out.id === 'motion' && input.inspection.motionOffset !== undefined) {
       const clip = input.file.slice(input.inspection.motionOffset, input.file.size, 'video/mp4');
@@ -244,10 +260,13 @@ async function runAv(
       run: async (api, jobId): Promise<Output | { needsFfmpeg: string }> => {
         const result = await api.convert(jobId, { file, probe, route, ffmpegDir }, settings);
         if (result.kind === 'needs-ffmpeg') return { needsFfmpeg: result.reason };
+        const dropped = out.group === 'video' && probe?.subtitles.some((track) => track.text);
         return {
           blob: new Blob([result.bytes as Uint8Array<ArrayBuffer>], { type: out.mime }),
           name: outputName(file.name, out.ext),
-          notes: result.notes,
+          notes: dropped
+            ? [...result.notes, "Subtitles aren't carried over; convert to SRT to keep them"]
+            : result.notes,
         };
       },
     });

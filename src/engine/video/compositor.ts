@@ -1,17 +1,25 @@
 // Draws one frame of a video project onto a 2D canvas. Used for both preview and export.
 import { fadeCurve } from '../audio/dsp';
 import { mainAt, mainLength, type Transform, type VideoProject } from '../../project/video';
+import { cueAt } from '../../captions/cues';
 import type { Drawable } from './frames';
+import { drawText } from './text';
 
 type Ctx = OffscreenCanvasRenderingContext2D;
 
 export type FrameLookup = (assetId: string, time: number) => Promise<Drawable | null>;
 
+// Resolves once every named family can be drawn.
+export type FontLoader = (families: ReadonlySet<string>) => Promise<void>;
+
 export class Compositor {
   private oriented = new OffscreenCanvas(1, 1);
   private small = new OffscreenCanvas(1, 1);
 
-  constructor(private readonly ctx: Ctx) {}
+  constructor(
+    private readonly ctx: Ctx,
+    private readonly fonts: FontLoader = async () => {},
+  ) {}
 
   // `scale` maps project pixels to canvas pixels (below 1 for a smaller preview).
   async draw(
@@ -91,6 +99,24 @@ export class Compositor {
         ctx.drawImage(this.small, 0, 0, sw, sh, x, y, w, h);
         ctx.imageSmoothingEnabled = true;
       }
+    }
+
+    const texts = project.texts.filter((t) => time >= t.start && time < t.start + t.duration);
+    const cues = project.captions.burn ? cueAt(project.captions.cues, time) : [];
+    if (texts.length || cues.length) {
+      const families = new Set(texts.map((t) => t.style.font));
+      if (cues.length) families.add(project.captions.style.font);
+      await this.fonts(families);
+      for (const t of texts) {
+        const local = time - t.start;
+        let fade = 1;
+        if (t.fadeIn > 0 && local < t.fadeIn) fade *= fadeCurve(local / t.fadeIn);
+        if (t.fadeOut > 0 && local > t.duration - t.fadeOut)
+          fade *= fadeCurve((t.duration - local) / t.fadeOut);
+        drawText(ctx, t.text, t.style, W, H, fade);
+      }
+      if (cues.length)
+        drawText(ctx, cues.map((c) => c.text).join('\n'), project.captions.style, W, H);
     }
     ctx.restore();
   }

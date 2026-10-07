@@ -23,6 +23,7 @@ const VIDEO: AvProbe = {
     alpha: false,
   },
   audio: { codec: 'aac', sampleRate: 48000, channels: 2, bitrate: 128_000, decodable: true },
+  subtitles: [],
   tags: { location: false, title: null, hasCover: false },
 };
 

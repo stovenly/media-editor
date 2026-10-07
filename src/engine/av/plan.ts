@@ -224,7 +224,7 @@ const LOSSLESS_BYTES_PER_SAMPLE: Record<string, number> = {
 // Expected output size in bytes, or null where a heuristic would mislead (animated images).
 export function estimateBytes(probe: AvProbe, settings: AvSettings): number | null {
   const out = target(settings.target);
-  if (out.group === 'animated' || out.group === 'image') return null;
+  if (out.group === 'animated' || out.group === 'image' || out.group === 'subtitle') return null;
   const duration = clipDuration(probe, settings);
   const perSample = LOSSLESS_BYTES_PER_SAMPLE[settings.target];
   if (perSample && probe.audio) {
@@ -276,6 +276,13 @@ export function ffmpegArgs(
   if (settings.trimEnd !== null && settings.trimEnd !== undefined)
     args.push('-t', String(Math.max(0, settings.trimEnd - (settings.trimStart ?? 0))));
   else if (settings.target === 'm4r') args.push('-t', String(RINGTONE_SECONDS));
+
+  if (out.group === 'subtitle') {
+    const index = Math.max(0, probe?.subtitles.findIndex((track) => track.text) ?? 0);
+    const codec = settings.target === 'vtt' ? 'webvtt' : settings.target === 'ass' ? 'ass' : 'srt';
+    args.push('-map', `0:s:${index}`, '-c:s', codec, output);
+    return { args, output };
+  }
 
   if (settings.metadata !== 'all')
     args.push(
@@ -620,4 +627,56 @@ export function slideshowJob(show: Slideshow): FfmpegJob & { list: string } {
   }
   args.push('-map_metadata', '-1', '-fflags', '+bitexact', output);
   return { args, output, list: lines.join('\n') + '\n' };
+}
+
+export type SubtitleMux = {
+  video: string; // file name under /in
+  subtitles: string;
+  subtitleFormat: 'srt' | 'vtt' | 'ass';
+  container: string; // the video's format id
+  existing: number; // subtitle tracks already in the video
+  language: string | null; // ISO 639-2
+};
+
+const MUX_CODECS: Record<string, string> = { mp4: 'mov_text', webm: 'webvtt' };
+
+export function subtitleContainer(format: string): 'mp4' | 'mov' | 'm4v' | 'webm' | 'mkv' {
+  return format === 'mp4' || format === 'mov' || format === 'm4v' || format === 'webm'
+    ? format
+    : 'mkv';
+}
+
+// Adds a subtitle file to a video as a soft track, copying every existing stream.
+export function subtitleMuxJob(mux: SubtitleMux): FfmpegJob {
+  const container = subtitleContainer(mux.container);
+  const family = container === 'webm' ? 'webm' : container === 'mkv' ? 'mkv' : 'mp4';
+  const codec =
+    MUX_CODECS[family] ??
+    (mux.subtitleFormat === 'vtt' ? 'webvtt' : mux.subtitleFormat === 'ass' ? 'ass' : 'srt');
+  const output = `${FILE_OUT}/output.${container}`;
+  const args = [
+    '-hide_banner',
+    '-nostdin',
+    '-y',
+    '-i',
+    `${FILE_IN}/${mux.video}`,
+    '-i',
+    `${FILE_IN}/${mux.subtitles}`,
+    '-map',
+    '0:v?',
+    '-map',
+    '0:a?',
+    '-map',
+    '0:s?',
+    '-map',
+    '1:0',
+    '-c',
+    'copy',
+  ];
+  const index = mux.existing;
+  args.push(`-c:s:${index}`, codec);
+  if (mux.language) args.push(`-metadata:s:s:${index}`, `language=${mux.language}`);
+  if (family === 'mp4') args.push('-movflags', '+faststart');
+  args.push(output);
+  return { args, output };
 }

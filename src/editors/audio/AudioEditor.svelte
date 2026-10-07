@@ -190,6 +190,7 @@
           av: {
             native: true,
             container: 'WAVE',
+            subtitles: [],
             duration: result.duration,
             audio: {
               codec: 'pcm-s16',

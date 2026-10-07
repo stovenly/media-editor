@@ -1,6 +1,9 @@
 // Main-thread side of the video editor: the compositor worker owns the preview canvas, the audio session the sound.
 import * as Comlink from 'comlink';
+import { toSrt } from '../../captions/cues';
+import { muxSubtitles } from '../../converter/subtitles.svelte';
 import { hub } from '../../engine';
+import { familyFor } from '../../engine/video/fonts';
 import { messageOf } from '../../engine/errors';
 import type { VideoExportSettings } from '../../engine/video/export';
 import type { FileItem } from '../../converter/files.svelte';
@@ -12,6 +15,8 @@ import {
   type VideoAsset,
   type VideoProject,
 } from '../../project/video';
+import { newId } from '../../project/audio';
+import type { ProjectFont } from '../../project/text';
 import { soundOf } from '../../project/video-audio';
 import type { VideoApi } from '../../workers/video.worker';
 import { AudioSession } from '../audio/session.svelte';
@@ -25,6 +30,7 @@ export class VideoSession {
   preparing = $state<string | null>(null);
   error = $state<string | null>(null);
   readonly audio = new AudioSession();
+  readonly fontFiles = new Map<string, File>(); // by ProjectFont.id
 
   private worker: Worker;
   private api: Comlink.Remote<VideoApi>;
@@ -97,6 +103,22 @@ export class VideoSession {
     return new File([output.blob], output.name, { type: output.blob.type });
   }
 
+  async addFont(file: File, taken: readonly string[], id = newId('font')): Promise<ProjectFont> {
+    const family = familyFor(file.name, taken);
+    await this.api.loadFont(family, await file.arrayBuffer());
+    this.fontFiles.set(id, file);
+    return { id, family, name: file.name };
+  }
+
+  async restoreFont(font: ProjectFont, file: File): Promise<void> {
+    await this.api.loadFont(font.family, await file.arrayBuffer());
+    this.fontFiles.set(font.id, file);
+  }
+
+  snapshot(project: VideoProject, time: number): Promise<Blob> {
+    return this.api.snapshot(project, time);
+  }
+
   render(project: VideoProject, time: number): void {
     this.wanted = { project, time };
     void this.pump();
@@ -133,18 +155,36 @@ export class VideoSession {
     void this.api.stop();
   }
 
+  // Soft captions are muxed in afterwards with FFmpeg, as mov_text in MP4 and WebVTT in WebM.
   async export(
     project: VideoProject,
     settings: VideoExportSettings,
-    onJob: (jobId: string) => void,
-  ) {
+    onJob: (jobId: string, stage: string) => void,
+  ): Promise<{ bytes: Uint8Array; notes: string[] }> {
     const jobId = `video-export-${++exportCounter}`;
-    onJob(jobId);
+    onJob(jobId, 'Exporting');
+    let result: { bytes: Uint8Array; notes: string[] };
     try {
-      return await this.api.export(jobId, project, settings);
+      result = await this.api.export(jobId, project, settings);
     } finally {
       hub.forget(jobId);
     }
+    const { cues, track, language } = project.captions;
+    if (!track || cues.length === 0) return result;
+    onJob('', 'Adding subtitles');
+    const { blob } = await muxSubtitles(
+      {
+        video: new Blob([result.bytes as Uint8Array<ArrayBuffer>]),
+        format: settings.container,
+        existing: 0,
+        duration: videoDuration(project),
+        subtitles: new Blob([toSrt(cues)]),
+        subtitleFormat: 'srt',
+        language: language || null,
+      },
+      (task) => onJob(task.id, 'Adding subtitles'),
+    );
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), notes: result.notes };
   }
 
   close(): void {

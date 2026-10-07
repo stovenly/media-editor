@@ -9,7 +9,8 @@ import {
 } from '../engine/audio/ring';
 import { openAsset, type AssetHandle } from '../engine/audio/source';
 import { messageOf } from '../engine/errors';
-import { Compositor, type FrameLookup } from '../engine/video/compositor';
+import { Compositor, type FontLoader, type FrameLookup } from '../engine/video/compositor';
+import { BUNDLED_FONTS } from '../engine/video/fonts';
 import { exportVideo, type VideoExportSettings } from '../engine/video/export';
 import { stillImage, VideoFrames, type Drawable } from '../engine/video/frames';
 import type { AssetKind, VideoAsset, VideoProject } from '../project/video';
@@ -38,6 +39,33 @@ function lookup(frames: (entry: Entry) => VideoFrames | null): FrameLookup {
 }
 
 const preview = lookup((entry) => entry.frames);
+
+const fontLoads = new Map<string, Promise<void>>();
+
+function loadBundled(family: string): Promise<void> {
+  const font = BUNDLED_FONTS.find((f) => f.family === family);
+  const loading = font
+    ? Promise.all(
+        font.faces.map((face) => {
+          const fontFace = new FontFace(family, `url(${face.url})`, {
+            style: face.style,
+            weight: face.weight,
+          });
+          self.fonts.add(fontFace);
+          return fontFace.load();
+        }),
+      ).then(() => {})
+    : Promise.resolve();
+  fontLoads.set(family, loading);
+  return loading;
+}
+
+// A font that fails to load falls back to sans-serif rather than stopping the render.
+const fonts: FontLoader = async (families) => {
+  await Promise.all(
+    [...families].map((family) => (fontLoads.get(family) ?? loadBundled(family)).catch(() => {})),
+  );
+};
 
 async function draw(project: VideoProject, time: number, maxEdge: number): Promise<void> {
   if (!canvas || !compositor) return;
@@ -92,7 +120,33 @@ const api = {
 
   setCanvas(offscreen: OffscreenCanvas): void {
     canvas = offscreen;
-    compositor = new Compositor(offscreen.getContext('2d', { alpha: false })!);
+    compositor = new Compositor(offscreen.getContext('2d', { alpha: false })!, fonts);
+  },
+
+  async loadFont(family: string, bytes: ArrayBuffer): Promise<void> {
+    const face = new FontFace(family, bytes);
+    const loading = face.load().then((loaded) => {
+      self.fonts.add(loaded);
+    });
+    fontLoads.set(family, loading);
+    try {
+      await loading;
+    } catch {
+      fontLoads.delete(family);
+      throw new Error("This font file can't be used");
+    }
+  },
+
+  // A full-resolution frame, drawn exactly as the export draws it.
+  async snapshot(project: VideoProject, time: number): Promise<Blob> {
+    const full = new OffscreenCanvas(project.width, project.height);
+    await new Compositor(full.getContext('2d', { alpha: false })!, fonts).draw(
+      project,
+      time,
+      preview,
+      1,
+    );
+    return full.convertToBlob({ type: 'image/png' });
   },
 
   async render(project: VideoProject, time: number, maxEdge: number): Promise<void> {
@@ -144,7 +198,7 @@ const api = {
       const audio = new Map(
         [...entries].flatMap(([id, e]) => (e.audio ? [[id, e.audio] as const] : [])),
       );
-      const result = await exportVideo(project, infos, audio, frames, settings, (f) =>
+      const result = await exportVideo(project, infos, audio, frames, fonts, settings, (f) =>
         reportProgress(jobId, f),
       );
       return Comlink.transfer(result, [result.bytes.buffer as ArrayBuffer]);
