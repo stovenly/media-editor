@@ -2,6 +2,7 @@
   import {
     Camera,
     Captions as CaptionsIcon,
+    Crop as CropIcon,
     ChevronLeft,
     ChevronRight,
     Download,
@@ -42,6 +43,7 @@
     ASPECTS,
     copyableCuts,
     layout,
+    mainAt,
     moveMain,
     newVideoProject,
     removeAny,
@@ -60,6 +62,7 @@
   import { saveProject } from '../../project/save';
   import ProjectMenu from '../../project/ProjectMenu.svelte';
   import type { Restore } from '../editing.svelte';
+  import CropOverlay from '../image/CropOverlay.svelte';
   import RedactOverlay from '../image/RedactOverlay.svelte';
   import CaptionsPanel from './CaptionsPanel.svelte';
   import { VideoSession } from './session.svelte';
@@ -200,7 +203,8 @@
   });
 
   $effect(() => {
-    if (project && !playing) session.render(project, position);
+    if (cropView) session.render(cropView.project, cropView.time);
+    else if (project && !playing) session.render(project, position);
   });
 
   // Playback position comes from the audio clock.
@@ -302,6 +306,76 @@
     return font.family;
   }
 
+  let cropping = $state<string | null>(null);
+
+  // The cropped clip's whole oriented source frame, at the playhead, drawn alone for cropping on.
+  const cropView = $derived.by(() => {
+    if (!project || !cropping) return null;
+    const clip = project.main.find((c) => c.id === cropping);
+    const asset = clip && session.assets.get(clip.assetId);
+    if (!clip || !asset) return null;
+    const { width, height } = orientedSize(clip, asset);
+    const at = mainAt(project, position).find((m) => m.clip.id === clip.id)?.source ?? clip.in;
+    const single: MainClip = {
+      ...clip,
+      in: at,
+      out: at + 1,
+      speed: 1,
+      fadeIn: 0,
+      fadeOut: 0,
+      transition: 0,
+      transform: { ...clip.transform, crop: null },
+    };
+    return {
+      clip,
+      time: 0,
+      project: {
+        ...project,
+        width: Math.max(2, Math.round(width / 2) * 2),
+        height: Math.max(2, Math.round(height / 2) * 2),
+        main: [single],
+        overlay: [],
+        texts: [],
+        redactions: [],
+        captions: { ...project.captions, burn: false },
+      },
+    };
+  });
+
+  $effect(() => {
+    if (cropping && !project?.main.some((c) => c.id === cropping)) cropping = null;
+  });
+
+  function orientedSize(clip: MainClip, asset: { width: number; height: number }) {
+    const sideways = clip.transform.rotate === 90 || clip.transform.rotate === 270;
+    return sideways
+      ? { width: asset.height, height: asset.width }
+      : { width: asset.width, height: asset.height };
+  }
+
+  // A centred crop with the project's shape: the largest that fits inside the clip.
+  function fillCrop(clip: MainClip): Rect | null {
+    const asset = session.assets.get(clip.assetId);
+    if (!project || !asset) return null;
+    const { width, height } = orientedSize(clip, asset);
+    const target = project.width / project.height;
+    const source = width / height;
+    if (Math.abs(target - source) < 0.001) return null;
+    return target < source
+      ? { x: (1 - target / source) / 2, y: 0, width: target / source, height: 1 }
+      : { x: 0, y: (1 - source / target) / 2, width: 1, height: source / target };
+  }
+
+  function setCrop(clip: MainClip, crop: Rect | null, label = 'Crop') {
+    if (!project) return;
+    const full =
+      crop && crop.x <= 0.0005 && crop.y <= 0.0005 && crop.width >= 0.999 && crop.height >= 0.999;
+    apply(
+      label,
+      updateMain(project, clip.id, { transform: { ...clip.transform, crop: full ? null : crop } }),
+    );
+  }
+
   function patchMain(label: string, patch: Partial<MainClip>) {
     if (project && selectedMain) apply(label, updateMain(project, selectedMain.id, patch));
   }
@@ -390,7 +464,7 @@
       void projectMenu?.save(false);
       return;
     }
-    if ((event.target as HTMLElement).closest('input, select, textarea')) return;
+    if ((event.target as HTMLElement).closest('input, select, textarea, [role=slider]')) return;
     if (event.key === ' ') {
       event.preventDefault();
       void togglePlay();
@@ -524,7 +598,11 @@
             <div class="relative mx-auto w-full max-w-4xl">
               <div
                 class="relative mx-auto bg-black"
-                style:aspect-ratio={project ? `${project.width} / ${project.height}` : '16 / 9'}
+                style:aspect-ratio={cropView
+                  ? `${cropView.project.width} / ${cropView.project.height}`
+                  : project
+                    ? `${project.width} / ${project.height}`
+                    : '16 / 9'}
                 style:max-height="55dvh"
               >
                 <canvas
@@ -532,7 +610,13 @@
                   class="block size-full object-contain"
                   aria-label="Preview"
                 ></canvas>
-                {#if project && drawingRedaction}
+                {#if cropView}
+                  <CropOverlay
+                    rect={cropView.clip.transform.crop ?? { x: 0, y: 0, width: 1, height: 1 }}
+                    aspect={null}
+                    onChange={(rect, label) => setCrop(cropView.clip, rect, label)}
+                  />
+                {:else if project && drawingRedaction}
                   <RedactOverlay
                     redactions={[]}
                     selected={null}
@@ -804,34 +888,43 @@
                         })}><FlipVertical2 size={15} /></button
                     >
                   </div>
-                  <label class="grid gap-1 text-xs">
-                    Crop
-                    <select
-                      class={field}
-                      onchange={(e) => {
-                        const v = (e.currentTarget as HTMLSelectElement).value;
-                        patchMain('Crop', {
-                          transform: {
-                            ...selectedMain.transform,
-                            crop:
-                              v === 'none'
-                                ? null
-                                : {
-                                    x: Number(v),
-                                    y: Number(v),
-                                    width: 1 - 2 * Number(v),
-                                    height: 1 - 2 * Number(v),
-                                  },
-                          },
-                        });
-                      }}
-                    >
-                      <option value="none">No crop</option>
-                      <option value="0.05">Trim 5% from each edge</option>
-                      <option value="0.1">Trim 10% from each edge</option>
-                      <option value="0.2">Trim 20% from each edge</option>
-                    </select>
-                  </label>
+                  <div class="space-y-1.5">
+                    <p class="text-xs">
+                      Crop
+                      <span class="text-muted"
+                        >· {selectedMain.transform.crop
+                          ? `${Math.round(selectedMain.transform.crop.width * 100)}% × ${Math.round(selectedMain.transform.crop.height * 100)}%`
+                          : 'none'}</span
+                      >
+                    </p>
+                    <div class="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs {cropping ===
+                        selectedMain.id
+                          ? 'border-accent bg-accent-soft text-accent'
+                          : 'border-line'}"
+                        aria-pressed={cropping === selectedMain.id}
+                        onclick={() =>
+                          (cropping = cropping === selectedMain.id ? null : selectedMain.id)}
+                        ><CropIcon size={12} />
+                        {cropping === selectedMain.id ? 'Done' : 'Crop on the preview'}</button
+                      >
+                      <button
+                        type="button"
+                        class="rounded-full border border-line px-2.5 py-1 text-xs"
+                        title="Crop to the project shape, so the clip fills the frame"
+                        onclick={() => setCrop(selectedMain, fillCrop(selectedMain))}
+                        >Fill the frame</button
+                      >
+                      <button
+                        type="button"
+                        class="rounded-full border border-line px-2.5 py-1 text-xs disabled:opacity-40"
+                        disabled={!selectedMain.transform.crop}
+                        onclick={() => setCrop(selectedMain, null)}>Remove crop</button
+                      >
+                    </div>
+                  </div>
                 </section>
               {:else if selectedOverlay}
                 <section class="space-y-2">
