@@ -40,6 +40,7 @@
     addText,
     appendMain,
     ASPECTS,
+    copyableCuts,
     layout,
     moveMain,
     newVideoProject,
@@ -84,6 +85,9 @@
   let exportQuality = $state(82);
   let exportMb = $state<number | null>(null);
   let exporting = $state<{ jobId: string; stage: string } | null>(null);
+  let preferCopy = $state(true);
+  const copyable = $derived(project ? copyableCuts(project, session.assets) !== null : false);
+  const fastCopy = $derived(copyable && preferCopy);
   let captionsPanel = $state<ReturnType<typeof CaptionsPanel>>();
   let exportError = $state<string | null>(null);
   let exported = $state<{ blob: Blob; name: string; notes: string[] } | null>(null);
@@ -360,14 +364,15 @@
           targetBytes: exportMb ? exportMb * 1_000_000 : null,
           codec: null,
         },
+        fastCopy,
         (jobId, stage) => (exporting = { jobId, stage }),
       );
       const stem = item.file.name.replace(/\.[^.]+$/, '');
       exported = {
         blob: new Blob([result.bytes as Uint8Array<ArrayBuffer>], {
-          type: exportFormat === 'mp4' ? 'video/mp4' : 'video/webm',
+          type: result.container === 'mp4' ? 'video/mp4' : 'video/webm',
         }),
-        name: `${stem}-edit.${exportFormat}`,
+        name: `${stem}-edit.${result.container}`,
         notes: result.notes,
       };
     } catch (error) {
@@ -411,6 +416,9 @@
     } else if ((event.key === 'Delete' || event.key === 'Backspace') && selected && project) {
       apply('Delete', removeAny(project, selected));
       selected = null;
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      seek(event.key === 'Home' ? 0 : duration);
     } else if (event.key === 'ArrowLeft') {
       step(-1);
     } else if (event.key === 'ArrowRight') {
@@ -1140,32 +1148,46 @@
                   <option value="mp4">MP4 (H.264)</option>
                   <option value="webm">WebM (VP9)</option>
                 </select>
-                <label class="grid gap-1 text-xs">
-                  <span class="flex justify-between"
-                    ><span>Smaller file</span><span>Better quality</span></span
+                {#if copyable}
+                  <label class="flex items-start gap-2 text-xs"
+                    ><input type="checkbox" class="mt-0.5" bind:checked={preferCopy} />
+                    <span
+                      >Fast export without re-encoding
+                      <span class="block text-muted"
+                        >No quality loss. Cuts move to the nearest key frame, and the original
+                        format is kept.</span
+                      ></span
+                    ></label
                   >
-                  <input
-                    type="range"
-                    min="1"
-                    max="100"
-                    bind:value={exportQuality}
-                    class="accent-accent"
-                    aria-label="Quality"
-                  />
-                </label>
-                <label class="flex items-center gap-2 text-xs"
-                  >Fit to <input
-                    type="number"
-                    min="0.1"
-                    step="any"
-                    placeholder="Off"
-                    class="w-20 rounded-lg border border-line bg-surface px-2 py-1"
-                    value={exportMb ?? ''}
-                    onchange={(e) =>
-                      (exportMb = (e.currentTarget as HTMLInputElement).value ? num(e) : null)}
-                  /> MB</label
-                >
-                {#if estimate}<p class="text-xs text-muted">About {formatBytes(estimate)}</p>{/if}
+                {/if}
+                {#if !fastCopy}
+                  <label class="grid gap-1 text-xs">
+                    <span class="flex justify-between"
+                      ><span>Smaller file</span><span>Better quality</span></span
+                    >
+                    <input
+                      type="range"
+                      min="1"
+                      max="100"
+                      bind:value={exportQuality}
+                      class="accent-accent"
+                      aria-label="Quality"
+                    />
+                  </label>
+                  <label class="flex items-center gap-2 text-xs"
+                    >Fit to <input
+                      type="number"
+                      min="0.1"
+                      step="any"
+                      placeholder="Off"
+                      class="w-20 rounded-lg border border-line bg-surface px-2 py-1"
+                      value={exportMb ?? ''}
+                      onchange={(e) =>
+                        (exportMb = (e.currentTarget as HTMLInputElement).value ? num(e) : null)}
+                    /> MB</label
+                  >
+                  {#if estimate}<p class="text-xs text-muted">About {formatBytes(estimate)}</p>{/if}
+                {/if}
                 {#if exporting}
                   <p class="inline-flex items-center gap-2 text-muted">
                     <LoaderCircle size={14} class="animate-spin" />

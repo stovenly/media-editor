@@ -156,16 +156,20 @@ export class VideoSession {
   }
 
   // Soft captions are muxed in afterwards with FFmpeg, as mov_text in MP4 and WebVTT in WebM.
+  // `copy` exports a cut-only edit by copying packets; the container may change to fit the source codecs.
   async export(
     project: VideoProject,
     settings: VideoExportSettings,
+    copy: boolean,
     onJob: (jobId: string, stage: string) => void,
-  ): Promise<{ bytes: Uint8Array; notes: string[] }> {
+  ): Promise<{ bytes: Uint8Array; notes: string[]; container: 'mp4' | 'webm' }> {
     const jobId = `video-export-${++exportCounter}`;
-    onJob(jobId, 'Exporting');
-    let result: { bytes: Uint8Array; notes: string[] };
+    onJob(jobId, copy ? 'Copying' : 'Exporting');
+    let result: { bytes: Uint8Array; notes: string[]; container: 'mp4' | 'webm' };
     try {
-      result = await this.api.export(jobId, project, settings);
+      result = copy
+        ? await this.api.exportCopy(jobId, project, settings.container)
+        : { ...(await this.api.export(jobId, project, settings)), container: settings.container };
     } finally {
       hub.forget(jobId);
     }
@@ -175,7 +179,7 @@ export class VideoSession {
     const { blob } = await muxSubtitles(
       {
         video: new Blob([result.bytes as Uint8Array<ArrayBuffer>]),
-        format: settings.container,
+        format: result.container,
         existing: 0,
         duration: videoDuration(project),
         subtitles: new Blob([toSrt(cues)]),
@@ -184,7 +188,7 @@ export class VideoSession {
       },
       (task) => onJob(task.id, 'Adding subtitles'),
     );
-    return { bytes: new Uint8Array(await blob.arrayBuffer()), notes: result.notes };
+    return { ...result, bytes: new Uint8Array(await blob.arrayBuffer()) };
   }
 
   close(): void {

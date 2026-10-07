@@ -318,3 +318,35 @@ export function mainAt(
   });
   return out;
 }
+
+// The source ranges of a cut-only edit of one video, which can be exported by copying packets.
+export function copyableCuts(
+  project: VideoProject,
+  assets: ReadonlyMap<string, VideoAsset>,
+): { assetId: string; ranges: { in: number; out: number }[] } | null {
+  const first = project.main[0];
+  const asset = first && assets.get(first.assetId);
+  if (!first || !asset || asset.kind !== 'video') return null;
+  if (project.overlay.length || project.music.length || project.texts.length) return null;
+  if (project.redactions.length || (project.captions.burn && project.captions.cues.length))
+    return null;
+  if (project.width !== Math.round(asset.width / 2) * 2) return null;
+  if (project.height !== Math.round(asset.height / 2) * 2) return null;
+  const plain = project.main.every(
+    (c) =>
+      c.assetId === first.assetId &&
+      c.speed === 1 &&
+      c.volume === 1 &&
+      !c.muted &&
+      c.fadeIn === 0 &&
+      c.fadeOut === 0 &&
+      c.transition === 0 &&
+      c.transform.crop === null &&
+      c.transform.rotate === 0 &&
+      !c.transform.flipH &&
+      !c.transform.flipV,
+  );
+  return plain
+    ? { assetId: first.assetId, ranges: project.main.map((c) => ({ in: c.in, out: c.out })) }
+    : null;
+}

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addText,
   appendMain,
+  copyableCuts,
+  removeAny,
   layout,
   mainAt,
   moveMain,
@@ -78,5 +81,31 @@ describe('video project', () => {
     expect(soundOf(project, assets).tracks[0]!.clips).toHaveLength(1);
     project = updateMain(project, project.main[0]!.id, { muted: true });
     expect(soundOf(project, assets).tracks[0]!.clips).toHaveLength(0);
+  });
+
+  it('recognises cut-only edits of one video', () => {
+    const assets = new Map([[CLIP.id, CLIP]]);
+    const single = appendMain(newVideoProject(CLIP), CLIP);
+    const cut = splitMain(splitMain(single, 1), 3);
+    const kept = removeAny(cut, cut.main[1]!.id);
+    expect(copyableCuts(kept, assets)).toEqual({
+      assetId: 'a',
+      ranges: [
+        { in: 0, out: 1 },
+        { in: 3, out: 4 },
+      ],
+    });
+    expect(copyableCuts(addText(kept, 0), assets)).toBeNull();
+    expect(copyableCuts(updateMain(kept, kept.main[0]!.id, { speed: 2 }), assets)).toBeNull();
+    expect(copyableCuts({ ...kept, width: 1920, height: 1080 }, assets)).toBeNull();
+    expect(
+      copyableCuts(
+        twoClips(),
+        new Map([
+          [CLIP.id, CLIP],
+          [STILL.id, STILL],
+        ]),
+      ),
+    ).toBeNull();
   });
 });

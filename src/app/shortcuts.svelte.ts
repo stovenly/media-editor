@@ -39,6 +39,7 @@ export const SHORTCUTS: Record<ShortcutScreen, { keys: string; action: string }[
     ...EDITING,
     { keys: 'Space', action: 'Play or pause' },
     { keys: '← / →', action: 'Previous / next frame' },
+    { keys: 'Home / End', action: 'Go to the start / end' },
     { keys: '[  /  ]', action: 'Select the previous / next item' },
     { keys: 'S', action: 'Split at the playhead' },
     { keys: 'T', action: 'Add text at the playhead' },

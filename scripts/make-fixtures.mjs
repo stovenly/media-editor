@@ -289,6 +289,23 @@ if (
       'language=eng',
       '-shortest',
     ]);
+  ffmpeg('keyed.mp4', [
+    ...video,
+    ...tone,
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-g',
+    '10',
+    '-keyint_min',
+    '10',
+    '-sc_threshold',
+    '0',
+    '-c:a',
+    'aac',
+    '-shortest',
+  ]);
   withSubs('subs.mp4', 'mov_text', 'libx264', 'aac');
   withSubs('subs.mkv', 'srt', 'libx264', 'libopus');
   withSubs('subs.webm', 'webvtt', 'libvpx-vp9', 'libopus');

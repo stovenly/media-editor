@@ -50,7 +50,7 @@ const EXPECTED_FORMAT: Record<string, string> = {
 };
 
 const OUTPUTS = TARGETS.filter((t) => t.from.includes('image') && t.requires !== 'motion');
-const AV = /^(clip|tone|subs)\.|\.(webm|srt)$/;
+const AV = /^(clip|tone|subs|keyed)\.|\.(webm|srt)$/;
 const INPUTS = available
   ? readdirSync(FIXTURES)
       .filter((name) => !AV.test(name))

@@ -11,9 +11,10 @@ import { openAsset, type AssetHandle } from '../engine/audio/source';
 import { messageOf } from '../engine/errors';
 import { Compositor, type FontLoader, type FrameLookup } from '../engine/video/compositor';
 import { BUNDLED_FONTS } from '../engine/video/fonts';
+import { copyCuts } from '../engine/video/copy-export';
 import { exportVideo, type VideoExportSettings } from '../engine/video/export';
 import { stillImage, VideoFrames, type Drawable } from '../engine/video/frames';
-import type { AssetKind, VideoAsset, VideoProject } from '../project/video';
+import { copyableCuts, type AssetKind, type VideoAsset, type VideoProject } from '../project/video';
 import { attachProgress, reportProgress } from './progress';
 
 type Entry = {
@@ -178,6 +179,25 @@ const api = {
 
   stop(): void {
     playing += 1;
+  },
+
+  async exportCopy(
+    jobId: string,
+    project: VideoProject,
+    preferred: 'mp4' | 'webm',
+  ): Promise<{ bytes: Uint8Array; notes: string[]; container: 'mp4' | 'webm' }> {
+    try {
+      const infos = new Map([...entries].map(([id, e]) => [id, e.info]));
+      const cuts = copyableCuts(project, infos);
+      const entry = cuts && entries.get(cuts.assetId);
+      if (!cuts || !entry) throw new Error('This edit needs a full export');
+      const result = await copyCuts(entry.file, cuts.ranges, preferred, (f) =>
+        reportProgress(jobId, f),
+      );
+      return Comlink.transfer(result, [result.bytes.buffer as ArrayBuffer]);
+    } catch (error) {
+      throw new Error(messageOf(error), { cause: error });
+    }
   },
 
   async export(
