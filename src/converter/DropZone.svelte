@@ -48,6 +48,10 @@
     <div class="space-y-1.5">
       <h1 class="text-2xl font-semibold tracking-tight">Convert and edit media</h1>
       <p class="text-muted">Drop images, audio or video anywhere on this page, or paste them.</p>
+      <p class="text-sm text-muted">
+        Then convert them, or press <span class="font-medium text-fg">Edit</span> on a file to crop, trim,
+        join, add text or captions.
+      </p>
     </div>
     <div class="flex flex-wrap items-center justify-center gap-2">
       <button

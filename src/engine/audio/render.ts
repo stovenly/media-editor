@@ -98,7 +98,15 @@ export async function* renderMix(
           const until = Math.min(frames, Math.round((clipEnd(clip) - t0) * rate));
           if (until <= offset) continue;
           const block = await entry.reader.read(until - offset);
-          mixInto(mix, block, offset, t0, rate, clip, track.gain * range.gain * duck);
+          mixInto(
+            mix,
+            block,
+            offset,
+            t0,
+            rate,
+            clip,
+            track.gain * (project.gain ?? 1) * range.gain * duck,
+          );
         }
       }
       for (const [id, entry] of active) {

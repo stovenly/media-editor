@@ -64,6 +64,8 @@
   import type { Restore } from '../editing.svelte';
   import CropOverlay from '../image/CropOverlay.svelte';
   import RedactOverlay from '../image/RedactOverlay.svelte';
+  import OverallVolume from '../shared/OverallVolume.svelte';
+  import PlaybackVolume from '../shared/PlaybackVolume.svelte';
   import CaptionsPanel from './CaptionsPanel.svelte';
   import { VideoSession } from './session.svelte';
   import TextPanel from './TextPanel.svelte';
@@ -657,6 +659,7 @@
               >
               <span class="font-mono text-sm tabular-nums">{time(position)} / {time(duration)}</span
               >
+              <PlaybackVolume session={session.audio} />
               <span class="mx-1 h-6 w-px bg-line"></span>
               <button
                 type="button"
@@ -1196,6 +1199,10 @@
 
               <section class="space-y-2">
                 <h3 class="font-medium">Project</h3>
+                <OverallVolume
+                  gain={project.gain ?? 1}
+                  onChange={(gain) => apply('Overall volume', { ...project, gain })}
+                />
                 <label class="grid gap-1 text-xs">
                   Shape
                   <select

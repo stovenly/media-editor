@@ -33,6 +33,7 @@ export type AudioProject = {
   normalize: Normalize;
   trimSilence: boolean;
   speed: number; // 0.5..2, pitch kept
+  gain?: number; // linear overall volume, applied before normalising; 1 when absent
 };
 
 export type AudioAssetInfo = {

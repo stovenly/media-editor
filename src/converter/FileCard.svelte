@@ -230,7 +230,7 @@
         <RotateCcw size={14} /> Retry
       </button>
     {:else if item.estimate && item.estimate.key === key}
-      <span class="tabular-nums text-muted" title="Estimated size">
+      <span class="tabular-nums text-muted max-sm:hidden" title="Estimated size">
         {#if item.estimate.bytes === null}<LoaderCircle
             size={14}
             class="animate-spin"
@@ -240,16 +240,17 @@
     {#if item.status === 'ready' && ((kind === 'image' && (item.inspection?.pages ?? 1) <= 1) || kind === 'audio' || kind === 'video')}
       <button
         type="button"
-        class="icon-button {item.edit ? 'text-accent' : ''}"
+        class="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors hover:border-accent hover:text-accent {item.edit
+          ? 'border-accent bg-accent-soft text-accent'
+          : 'border-line'}"
         aria-label="Edit {item.file.name}"
-        title={item.edit ? 'Edited' : 'Edit'}
-        onclick={onEdit}><Pencil size={16} /></button
+        onclick={onEdit}><Pencil size={14} /> {item.edit ? 'Edited' : 'Edit'}</button
       >
     {/if}
     {#if item.status === 'ready'}
       <button
         type="button"
-        class="icon-button"
+        class="icon-button max-sm:hidden"
         aria-label="Details for {item.file.name}"
         onclick={onDetails}><Info size={16} /></button
       >

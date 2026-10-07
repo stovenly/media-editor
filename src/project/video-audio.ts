@@ -49,5 +49,6 @@ export function soundOf(
     normalize: { mode: 'off' },
     trimSilence: false,
     speed: 1,
+    gain: project.gain ?? 1,
   };
 }

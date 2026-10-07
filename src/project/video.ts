@@ -82,6 +82,7 @@ export type VideoProject = {
   texts: TextClip[];
   captions: Captions;
   fonts: ProjectFont[];
+  gain?: number; // linear overall volume of the sound; 1 when absent
 };
 
 export const STILL_SECONDS = 3;
@@ -328,6 +329,7 @@ export function copyableCuts(
   const asset = first && assets.get(first.assetId);
   if (!first || !asset || asset.kind !== 'video') return null;
   if (project.overlay.length || project.music.length || project.texts.length) return null;
+  if ((project.gain ?? 1) !== 1) return null;
   if (project.redactions.length || (project.captions.burn && project.captions.cues.length))
     return null;
   if (project.width !== Math.round(asset.width / 2) * 2) return null;

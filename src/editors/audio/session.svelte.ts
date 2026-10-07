@@ -17,6 +17,12 @@ import type { AudioApi } from '../../workers/audio.worker';
 export const PEAKS_PER_SECOND = 200;
 
 let exportCounter = 0;
+const VOLUME_KEY = 'playback-volume';
+
+function storedVolume(): number {
+  const saved = Number(localStorage.getItem(VOLUME_KEY));
+  return Number.isFinite(saved) && localStorage.getItem(VOLUME_KEY) !== null ? saved : 0.8;
+}
 
 export class AudioSession {
   assets = $state.raw<AudioAssetInfo[]>([]);
@@ -24,11 +30,14 @@ export class AudioSession {
   playing = $state(false);
   position = $state(0); // seconds on the timeline
   error = $state<string | null>(null);
+  volume = $state(storedVolume()); // 0..1, playback only
+  muted = $state(false);
 
   private worker: Worker;
   private api: Comlink.Remote<AudioApi>;
   private context: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
+  private output: GainNode | null = null;
   private ring: Ring | null = null;
   private startedAt = 0;
   private speed = 1;
@@ -63,6 +72,7 @@ export class AudioSession {
     const rate = project.sampleRate;
     if (!this.context || this.context.sampleRate !== rate) {
       await this.context?.close();
+      this.output = null;
       this.context = new AudioContext({ sampleRate: rate, latencyHint: 'playback' });
       await this.context.audioWorklet.addModule(processorUrl);
     }
@@ -76,7 +86,10 @@ export class AudioSession {
         channels: this.ring.channels,
       },
     });
-    this.node.connect(this.context.destination);
+    this.output ??= this.context.createGain();
+    this.output.connect(this.context.destination);
+    this.applyVolume();
+    this.node.connect(this.output);
     this.startedAt = from;
     this.speed = project.speed;
     this.rate = rate;
@@ -87,6 +100,20 @@ export class AudioSession {
     });
     this.tick();
     return this.ring;
+  }
+
+  setVolume(volume: number, muted = false): void {
+    this.volume = Math.min(1, Math.max(0, volume));
+    this.muted = muted;
+    localStorage.setItem(VOLUME_KEY, String(this.volume));
+    this.applyVolume();
+  }
+
+  // Squared, so the slider feels even to the ear.
+  private applyVolume(): void {
+    if (!this.output || !this.context) return;
+    const level = this.muted ? 0 : this.volume ** 2;
+    this.output.gain.setTargetAtTime(level, this.context.currentTime, 0.015);
   }
 
   stop(): void {

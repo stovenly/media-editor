@@ -67,3 +67,15 @@ test('plays from the playhead', async ({ page, browserName }) => {
   await expect(page.locator('span.font-mono')).not.toHaveText(/^0:00\.0/, { timeout: 10_000 });
   expect(errors).toEqual([]);
 });
+
+test('playback volume is separate from the export and is remembered', async ({ page }) => {
+  await open(page);
+  const volume = page.getByRole('slider', { name: 'Playback volume' });
+  await volume.fill('0.3');
+  await page.getByRole('button', { name: 'Mute playback' }).click();
+  await expect(page.getByRole('button', { name: 'Unmute playback' })).toBeVisible();
+  await expect(page.getByRole('slider', { name: /^Overall volume/ })).toBeVisible();
+
+  await open(page);
+  await expect(page.getByRole('slider', { name: 'Playback volume' })).toHaveValue('0.3');
+});

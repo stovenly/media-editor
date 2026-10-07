@@ -43,6 +43,8 @@
   import { saveProject } from '../../project/save';
   import ProjectMenu from '../../project/ProjectMenu.svelte';
   import type { Restore } from '../editing.svelte';
+  import OverallVolume from '../shared/OverallVolume.svelte';
+  import PlaybackVolume from '../shared/PlaybackVolume.svelte';
   import { audioFileFor } from './prepare';
   import { AudioSession } from './session.svelte';
   import Timeline, { type Selection } from './Timeline.svelte';
@@ -352,6 +354,7 @@
               <span class="font-mono text-sm tabular-nums"
                 >{time(session.position)} / {time(duration)}</span
               >
+              <PlaybackVolume {session} />
               <span class="mx-2 h-6 w-px bg-line"></span>
               <button
                 type="button"
@@ -567,6 +570,11 @@
 
             <section class="space-y-2">
               <h3 class="font-medium">Whole mix</h3>
+              <OverallVolume
+                gain={project.gain ?? 1}
+                disabled={project.normalize.mode !== 'off'}
+                onChange={(gain) => apply('Overall volume', { ...project, gain })}
+              />
               <label class="grid gap-1 text-xs">
                 Normalise
                 <select
