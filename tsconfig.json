@@ -15,7 +15,8 @@
     "resolveJsonModule": true,
     "allowJs": true,
     "checkJs": true,
-    "noEmit": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
   "include": ["src/**/*", "tests/**/*", "*.ts", "*.js"],
   "exclude": ["src/sw/sw.js", "src/engine/audio/ring-processor.js"]

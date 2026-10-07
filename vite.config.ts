@@ -4,7 +4,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import tailwindcss from '@tailwindcss/vite';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
-import { webManifest } from './src/app/manifest';
+import { webManifest } from './src/app/manifest.ts';
 import { CSP, CSP_META, cspFor, ISOLATION, WORKER_CSP } from './src/sw/headers.js';
 
 // Large encoders each worker bundles its own copy of; cached when first used rather than at install.

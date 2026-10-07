@@ -1,5 +1,5 @@
 // The web app manifest, built from the format table so "Open with" lists exactly what the converter reads.
-import { FORMATS, type MediaKind } from '../io/formats';
+import { FORMATS, type MediaKind } from '../io/formats.ts';
 
 // Format ids whose usual file extensions differ from the id.
 const EXTENSIONS: Record<string, string[]> = {

@@ -3,6 +3,7 @@ import { parseSubtitles, writeSubtitles, type Cue, type SubtitleFormat } from '.
 import { probeAv, type AvProbe } from '../media/probe';
 import { readMetadata, type MetadataSummary } from '../metadata/read';
 import { frameCount } from './frames';
+import { imageHeader } from './header';
 import { sniff, type Sniffed } from './sniff';
 
 export type Inspection = {
@@ -63,8 +64,10 @@ export async function inspect(file: File): Promise<Inspection> {
   }
   if (sniffed.kind !== 'image') return result;
 
+  let header: ReturnType<typeof imageHeader> = null;
   if (file.size <= METADATA_LIMIT) {
     const buffer = await file.arrayBuffer();
+    header = imageHeader(new Uint8Array(buffer), sniffed.format ?? '');
     result.pages = frameCount(sniffed.format ?? '', new Uint8Array(buffer));
     result.metadata = readMetadata(buffer);
     if (result.metadata.motion && sniffed.format === 'jpeg')
@@ -74,9 +77,10 @@ export async function inspect(file: File): Promise<Inspection> {
     try {
       Object.assign(result, await browserThumbnail(file));
     } catch {
-      // Left to the image engine.
+      // Left to the image engine, or to the header below.
     }
   }
+  if (header && !result.width) Object.assign(result, header);
   return result;
 }
 

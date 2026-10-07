@@ -1,5 +1,5 @@
 // Renders an audio project and encodes it as it goes. Runs in the audio worker.
-import { AudioSample, AudioSampleSource, BufferTarget, Output } from 'mediabunny';
+import { AudioSample, AudioSampleSource, BufferTarget, canEncodeAudio, Output } from 'mediabunny';
 import { projectDuration, type AudioProject } from '../../project/audio';
 import { audioBitrate, NATIVE_TARGETS, RINGTONE_SECONDS } from '../av/plan';
 import { outputFormat, registerEncoders } from '../av/native';
@@ -57,7 +57,9 @@ export async function exportProject(
   const duration = Math.max(0.001, (to - from) / project.speed);
 
   const native = NATIVE_TARGETS[settings.target];
-  const intermediate = !native || native.video !== undefined;
+  // Without an encoder here, a WAV is rendered and the converter (which can fall back to FFmpeg) finishes it.
+  const intermediate =
+    !native || native.video !== undefined || !(await canEncodeAudio(native.audio));
   const spec = intermediate ? NATIVE_TARGETS.wav! : native;
   let bitrate: number | undefined;
   if (!LOSSLESS.has(spec.container)) {
