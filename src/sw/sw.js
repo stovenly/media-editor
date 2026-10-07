@@ -8,6 +8,9 @@ const ENGINE_CACHE = 'engines';
 const scope = new URL(self.registration.scope);
 const enginePrefix = new URL('wasm/', scope).pathname;
 const indexUrl = new URL('index.html', scope).href;
+const shareUrl = new URL('share', scope).href;
+// Contract with src/app/launch.ts: shared files wait in this cache until the page picks them up.
+const SHARE_CACHE = 'shared-files';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -37,6 +40,10 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.cache === 'only-if-cached' && request.mode !== 'same-origin') return;
   const url = new URL(request.url);
+  if (request.method === 'POST' && url.href.split('?')[0] === shareUrl) {
+    event.respondWith(receiveShare(request));
+    return;
+  }
   if (request.method !== 'GET' || url.origin !== scope.origin) {
     event.respondWith(fetch(request).then((response) => withHeaders(response, request)));
     return;
@@ -49,6 +56,26 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(cacheFirst(request, SHELL_CACHE));
   }
 });
+
+async function receiveShare(request) {
+  const form = await request.formData();
+  const cache = await caches.open(SHARE_CACHE);
+  const files = form.getAll('files').filter((value) => typeof value !== 'string');
+  await Promise.all(
+    files.map((file, index) =>
+      cache.put(
+        new URL(`share/${Date.now()}-${index}`, scope).href,
+        new Response(file, {
+          headers: {
+            'Content-Type': file.type || 'application/octet-stream',
+            'X-File-Name': encodeURIComponent(file.name),
+          },
+        }),
+      ),
+    ),
+  );
+  return Response.redirect(new URL('./?shared', scope).href, 303);
+}
 
 async function networkFirst(request, fallbackUrl) {
   try {

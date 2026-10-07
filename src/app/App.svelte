@@ -4,8 +4,11 @@
   import { projects } from '../project/open.svelte';
   import ProjectDialog from '../project/ProjectDialog.svelte';
   import DropTarget from './DropTarget.svelte';
+  import { receiveLaunchedFiles } from './launch';
   import { shortcutHelp } from './shortcuts.svelte';
   import ShortcutsDialog from './ShortcutsDialog.svelte';
+
+  receiveLaunchedFiles((launched) => projects.intake(launched));
   import ThemeToggle from './ui/ThemeToggle.svelte';
 </script>
 

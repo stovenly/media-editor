@@ -4,6 +4,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import tailwindcss from '@tailwindcss/vite';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
+import { webManifest } from './src/app/manifest';
 import { CSP, CSP_META, cspFor, ISOLATION, WORKER_CSP } from './src/sw/headers.js';
 
 // Emits sw.js with the header policy and the hashed app-shell file list baked
@@ -20,8 +21,11 @@ function serviceWorker(): Plugin {
       },
     ],
     generateBundle(_options, bundle) {
+      this.emitFile({ type: 'asset', fileName: 'manifest.webmanifest', source: webManifest() });
       const bundled = Object.keys(bundle).filter((name) => !name.endsWith('.map'));
-      const shell = [...new Set(['index.html', ...bundled, ...publicFiles()])];
+      const shell = [
+        ...new Set(['index.html', 'manifest.webmanifest', ...bundled, ...publicFiles()]),
+      ];
       const version = createHash('sha256').update(shell.join('\n')).digest('hex').slice(0, 12);
       const build = { version, shell, headers: ISOLATION, csp: CSP, workerCsp: WORKER_CSP };
       const source = readFileSync('src/sw/sw.js', 'utf8').replace(
@@ -29,6 +33,28 @@ function serviceWorker(): Plugin {
         `const BUILD = ${JSON.stringify(build)};`,
       );
       this.emitFile({ type: 'asset', fileName: 'sw.js', source });
+    },
+  };
+}
+
+// Links the web app manifest, which the build emits and the dev server serves.
+function manifest(): Plugin {
+  let base = '/';
+  return {
+    name: 'web-manifest',
+    configResolved(config) {
+      base = config.base;
+    },
+    transformIndexHtml: () => [
+      { tag: 'link', attrs: { rel: 'manifest', href: `${base}manifest.webmanifest` } },
+      { tag: 'meta', attrs: { name: 'theme-color', content: '#4f46e5' } },
+    ],
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (!request.url?.endsWith('/manifest.webmanifest')) return next();
+        response.setHeader('Content-Type', 'application/manifest+json');
+        response.end(webManifest());
+      });
     },
   };
 }
@@ -54,7 +80,7 @@ function publicFiles(): string[] {
 
 export default defineConfig({
   base: process.env.BASE_PATH ?? '/',
-  plugins: [svelte(), tailwindcss(), serviceWorker(), previewCsp()],
+  plugins: [svelte(), tailwindcss(), serviceWorker(), previewCsp(), manifest()],
   server: { headers: ISOLATION },
   preview: { headers: ISOLATION },
   worker: { format: 'es' },
