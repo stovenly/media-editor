@@ -192,6 +192,8 @@
   }
 
   let projectMenu = $state<ReturnType<typeof ProjectMenu>>();
+  let stage = $state<ReturnType<typeof Stage>>();
+  let zoom = $state<number | null>(null);
 
   function save(bundle: boolean) {
     return saveProject(item.file.name, { kind: 'image', edit }, [item], { bundle });
@@ -213,6 +215,12 @@
       history.redo();
     } else if (isTyping(event.target) || mod || event.altKey) {
       return;
+    } else if (event.key === '+' || event.key === '=') {
+      stage?.zoomBy(1);
+    } else if (event.key === '-') {
+      stage?.zoomBy(-1);
+    } else if (event.key === '0') {
+      zoom = zoom === null ? 1 : null;
     } else if (event.key.toLowerCase() === 'r') {
       rotateBy(event.shiftKey ? -90 : 90);
     } else if (event.key.toLowerCase() === 'f') {
@@ -302,7 +310,22 @@
               <LoaderCircle size={16} class="animate-spin" /> Opening image…
             </p>
           {:else}
-            <Stage bitmap={session.bitmap}>
+            <Stage
+              bind:this={stage}
+              bind:zoom
+              bitmap={session.bitmap}
+              scale={session.size?.scale ?? 1}
+              detail={session.detail}
+              onDetail={(region, width, height, key) =>
+                session.requestDetail(
+                  edit,
+                  compare ? 'original' : tab === 'crop' ? 'geometry' : 'full',
+                  region,
+                  width,
+                  height,
+                  key,
+                )}
+            >
               {#snippet overlay()}
                 {#if !compare && tab === 'crop'}
                   <CropOverlay

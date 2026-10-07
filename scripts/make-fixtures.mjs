@@ -128,6 +128,10 @@ write(
 );
 write('gradient.ppm', rgbGradient().writeToBuffer('.ppm'));
 write(
+  'stripes.png',
+  vips.Image.xyz(4000, 3000).extractBand(0).remainder(2).linear(255, 0).cast('uchar').pngsaveBuffer(),
+);
+write(
   'shape.svg',
   new TextEncoder().encode(
     '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="48" viewBox="0 0 64 48"><circle cx="24" cy="24" r="20" fill="#4f46e5"/><rect x="40" y="8" width="20" height="32" fill="#f59e0b" opacity="0.6"/></svg>',

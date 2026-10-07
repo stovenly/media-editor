@@ -50,10 +50,11 @@ const EXPECTED_FORMAT: Record<string, string> = {
 };
 
 const OUTPUTS = TARGETS.filter((t) => t.from.includes('image') && t.requires !== 'motion');
-const AV = /^(clip|tone|subs|keyed)\.|\.(webm|srt)$/;
+// Audio, video and subtitle fixtures, and the large image the editor's zoom test uses.
+const SKIPPED = /^(clip|tone|subs|keyed|stripes)\.|\.(webm|srt)$/;
 const INPUTS = available
   ? readdirSync(FIXTURES)
-      .filter((name) => !AV.test(name))
+      .filter((name) => !SKIPPED.test(name))
       .sort()
   : [];
 

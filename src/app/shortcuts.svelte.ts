@@ -23,6 +23,7 @@ export const SHORTCUTS: Record<ShortcutScreen, { keys: string; action: string }[
     { keys: 'R  /  Shift R', action: 'Rotate right / left' },
     { keys: 'F  /  Shift F', action: 'Flip horizontally / vertically' },
     { keys: 'Hold Space', action: 'Compare with the original' },
+    { keys: '+  /  −  /  0', action: 'Zoom in / out / switch between fit and 100%' },
     { keys: 'Delete', action: 'Remove the selected covered area' },
     { keys: 'Esc', action: 'Close the editor' },
   ],

@@ -4,12 +4,13 @@ import { scheduler } from '../../engine';
 import { downloads } from '../../engine/downloads.svelte';
 import { planImage } from '../../engine/image/router';
 import type { Inspection } from '../../io/inspect';
-import type { ImageEdit } from '../../project/image-edit';
+import type { ImageEdit, Rect } from '../../project/image-edit';
 import type { EditorApi, Stage } from '../../workers/editor.worker';
 
 export class EditorSession {
   bitmap = $state.raw<ImageBitmap | null>(null);
-  size = $state.raw<{ width: number; height: number } | null>(null);
+  detail = $state.raw<{ bitmap: ImageBitmap; region: Rect; key: string } | null>(null);
+  size = $state.raw<{ width: number; height: number; scale: number } | null>(null);
   error = $state<string | null>(null);
   busy = $state(false);
 
@@ -17,6 +18,15 @@ export class EditorSession {
   private api: Comlink.Remote<EditorApi>;
   private wanted: { edit: ImageEdit; stage: Stage } | null = null;
   private rendering = false;
+  private wantedDetail: {
+    edit: ImageEdit;
+    stage: Stage;
+    region: Rect;
+    width: number;
+    height: number;
+    key: string;
+  } | null = null;
+  private detailing = false;
   private ready: Promise<void>;
 
   constructor(file: File, inspection: Inspection) {
@@ -73,7 +83,46 @@ export class EditorSession {
     }
   }
 
+  // Full-resolution pixels for the visible part of a zoomed view; `key` ties the result to the edit it shows.
+  requestDetail(
+    edit: ImageEdit,
+    stage: Stage,
+    region: Rect,
+    width: number,
+    height: number,
+    key: string,
+  ): void {
+    this.wantedDetail = { edit, stage, region, width, height, key };
+    void this.pumpDetail();
+  }
+
+  clearDetail(): void {
+    this.wantedDetail = null;
+    this.detail?.bitmap.close();
+    this.detail = null;
+  }
+
+  private async pumpDetail(): Promise<void> {
+    if (this.detailing) return;
+    this.detailing = true;
+    try {
+      await this.ready;
+      while (this.wantedDetail) {
+        const { edit, stage, region, width, height, key } = this.wantedDetail;
+        this.wantedDetail = null;
+        const bitmap = await this.api.detail(edit, stage, region, width, height);
+        this.detail?.bitmap.close();
+        this.detail = { bitmap, region, key };
+      }
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.detailing = false;
+    }
+  }
+
   close(): void {
+    this.detail?.bitmap.close();
     this.bitmap?.close();
     this.bitmap = null;
     this.worker.terminate();
