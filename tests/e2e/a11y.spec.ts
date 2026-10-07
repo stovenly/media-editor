@@ -66,7 +66,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.goto(NATIVE);
       await upload(page, ['gradient.jpg']);
       await page.getByRole('button', { name: 'Edit gradient.jpg' }).click();
-      await expect(page.getByText('64×48')).toBeVisible();
+      await expect(page.getByRole('dialog').getByText('64×48')).toBeVisible();
       await audit(page, 'image editor');
     });
 

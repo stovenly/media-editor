@@ -16,6 +16,7 @@ test('shows the shortcuts for the current screen', async ({ page }) => {
 
 test('opens the file picker and converts from the keyboard', async ({ page }) => {
   await page.goto(NATIVE);
+  await expect(page.getByRole('button', { name: /Choose files|Add files/ }).first()).toBeVisible();
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser'),
     page.keyboard.press('ControlOrMeta+o'),
@@ -43,9 +44,9 @@ test('rotates and flips in the image editor from the keyboard', async ({ page })
       buffer: readFileSync(join(FIXTURES, 'gradient.jpg')),
     });
   await page.getByRole('button', { name: 'Edit gradient.jpg' }).click();
-  await expect(page.getByText('64×48')).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('64×48')).toBeVisible();
   await page.keyboard.press('r');
-  await expect(page.getByText('48×64')).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('48×64')).toBeVisible();
   await page.keyboard.press('f');
   await expect(page.getByRole('button', { name: 'Flip horizontally' })).toHaveAttribute(
     'aria-pressed',

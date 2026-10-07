@@ -137,10 +137,10 @@ test('reopens an image project with its edit', async ({ page }) => {
   await upload(page, [fixture('gradient.jpg')]);
   await page.getByRole('button', { name: 'Edit gradient.jpg' }).click();
   await page.getByRole('button', { name: 'Rotate right' }).click();
-  await expect(page.getByText('48×64')).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('48×64')).toBeVisible();
   const saved = await saveProject(page, /^Project file/);
 
   await page.goto(NATIVE);
   await upload(page, [fixture('gradient.jpg', 'other-name.jpg'), saved]);
-  await expect(page.getByText('48×64')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('dialog').getByText('48×64')).toBeVisible({ timeout: 30_000 });
 });

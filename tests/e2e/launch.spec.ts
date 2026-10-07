@@ -17,10 +17,8 @@ test('the manifest offers "Open with" and sharing for media files', async ({ pag
 test('files shared to the app open in the converter', async ({ page, browserName }) => {
   test.skip(browserName === 'webkit', 'Service workers are off in Playwright WebKit');
   await page.goto(NATIVE);
-  await page.waitForFunction(async () => {
-    await navigator.serviceWorker.ready;
-    return navigator.serviceWorker.controller !== null;
-  });
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
   await page.evaluate(async () => {
     const form = new FormData();
     form.append('files', new File(['1\n00:00:01,000 --> 00:00:02,000\nShared\n'], 'shared.srt'));
