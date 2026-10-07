@@ -7,6 +7,9 @@ import { defineConfig } from 'vitest/config';
 import { webManifest } from './src/app/manifest';
 import { CSP, CSP_META, cspFor, ISOLATION, WORKER_CSP } from './src/sw/headers.js';
 
+// Large encoders each worker bundles its own copy of; cached when first used rather than at install.
+const ON_DEMAND = /(mediabunny-(aac|flac|mp3)-encoder|gifski_wasm_bg)-[\w-]+\.(js|wasm)$/;
+
 // Emits sw.js with the header policy and the hashed app-shell file list baked
 // in, and puts the CSP in a <meta> for the first, uncontrolled load.
 function serviceWorker(): Plugin {
@@ -22,12 +25,33 @@ function serviceWorker(): Plugin {
     ],
     generateBundle(_options, bundle) {
       this.emitFile({ type: 'asset', fileName: 'manifest.webmanifest', source: webManifest() });
-      const bundled = Object.keys(bundle).filter((name) => !name.endsWith('.map'));
+      for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES'])
+        this.emitFile({
+          type: 'asset',
+          fileName: `${file}.txt`,
+          source: readFileSync(file, 'utf8'),
+        });
+      const bundled = Object.keys(bundle).filter(
+        (name) => !name.endsWith('.map') && !ON_DEMAND.test(name),
+      );
       const shell = [
         ...new Set(['index.html', 'manifest.webmanifest', ...bundled, ...publicFiles()]),
       ];
       const version = createHash('sha256').update(shell.join('\n')).digest('hex').slice(0, 12);
-      const build = { version, shell, headers: ISOLATION, csp: CSP, workerCsp: WORKER_CSP };
+      const engines = Object.values(
+        JSON.parse(readFileSync('public/wasm/manifest.json', 'utf8')) as Record<
+          string,
+          { dir: string }
+        >,
+      ).map((engine) => engine.dir);
+      const build = {
+        version,
+        shell,
+        engines,
+        headers: ISOLATION,
+        csp: CSP,
+        workerCsp: WORKER_CSP,
+      };
       const source = readFileSync('src/sw/sw.js', 'utf8').replace(
         'const BUILD = __BUILD__;',
         `const BUILD = ${JSON.stringify(build)};`,

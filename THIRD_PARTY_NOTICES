@@ -1,31 +1,91 @@
 Third-party software shipped in the built application.
 
-Each entry gives the component, its licence, and where its source is
-available. WebAssembly engines are copied unmodified from the pinned npm
-packages listed in package-lock.json (see scripts/vendor-wasm.mjs).
+Each entry gives the component, the version shipped, its licence and where its
+source is available. The WebAssembly engines are copied unmodified from the npm
+packages pinned in package-lock.json (see scripts/vendor-wasm.mjs) and are
+served from wasm/<engine>-<version>/ in the build, next to the licence and
+notice files their packages ship. The corresponding source for each binary is
+the named release of the project that built it, whose build scripts pin the
+exact versions of the libraries listed under it. This file and the app's own
+licence are also in the build as THIRD_PARTY_NOTICES.txt and LICENSE.txt.
 
---------------------------------------------------------------------------------
+================================================================================
+WebAssembly engines
+================================================================================
+
+wasm-vips 0.0.19                          MIT
+  Binary:  wasm/vips-0.0.19/ (vips.wasm, vips-jxl.wasm, vips-heif.wasm,
+           vips-resvg.wasm, vips-es6.js), with its LICENSE,
+           THIRD-PARTY-NOTICES.md and versions.json
+  Source:  https://github.com/kleisauke/wasm-vips, release v0.0.19
+  Includes libvips 8.18.7 (LGPL), aom 3.15.1 (BSD-2 + AOM patent licence),
+  brotli 1.2.0 (MIT), cgif 0.5.4 (MIT), expat 2.8.5 (MIT), glib 2.90.0
+  (LGPL), highway 1.4.0 (BSD-3), lcms 2.19.1 (MIT), libexif 0.6.26 (LGPL),
+  libffi 3.8.0 (MIT), libheif 1.23.5 (LGPL), libimagequant 2.4.1 (BSD-2),
+  libjxl 0.12.0 (BSD-3), libnsgif (MIT), libpng 1.6.58 (libpng), libtiff
+  4.7.2 (libtiff), libultrahdr 2.0.2 (MIT), libwebp 1.6.0 (BSD-3),
+  mozjpeg (zlib, IJG, BSD-3), resvg 0.48.1 (MIT) and zlib-ng 2.3.3 (zlib),
+  built with Emscripten 6.0.10 (MIT).
+
+magick-wasm 0.0.44                        Apache-2.0
+  Binary:  wasm/magick-0.0.44/magick.wasm, with its LICENSE and NOTICE
+  Source:  https://github.com/dlemstra/magick-wasm, release 0.0.44
+  Includes ImageMagick 7.1.2-32 (ImageMagick licence), aom 3.15.1, brotli
+  1.2.0, bzip2 1.0.8, libde265 1.1.3 (LGPL-3.0), OpenEXR 3.5.1, libffi
+  3.8.0, freetype 2.14.3, glib 2.64.3, libheif 1.23.5, highway 1.4.0, Imath
+  3.2.3, libjpeg-turbo 3.2.0, libjxl 0.12.0, lcms 2.19.1, liblqr 0.4.2
+  (LGPL-3.0), OpenJPEG 2.5.4, OpenJPH 0.32.0, libpng 1.6.58, LibRaw 0.22.2
+  (LGPL-2.1 / CDDL-1.0), libtiff 4.7.2, libwebp 1.6.0, libxml2 2.15.4,
+  zlib 1.3.2 and zstd 1.5.7. The licence text of each is in the NOTICE file.
+
+FFmpeg, ffmpeg.wasm core 0.12.10          GPL-2.0-or-later
+  Binary:  wasm/ffmpeg-0.12.10/ (ffmpeg-core.wasm, ffmpeg-core.js, NOTICE)
+  Source:  https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v0.12.10
+           The Dockerfile and build/ scripts there pin FFmpeg and every
+           library below.
+  FFmpeg (GPL build) with x264 and x265 (GPL-2.0-or-later), libvpx (BSD-3),
+  LAME (LGPL-2.0), libvorbis and libogg (BSD-3), libopus (BSD-3), libtheora
+  (BSD-3), libwebp (BSD-3), zlib (zlib), freetype (FTL), fribidi
+  (LGPL-2.1), harfbuzz (MIT), libass (ISC) and zimg (WTFPL).
+
+gifski-wasm 2.2.0                         AGPL-3.0-or-later
+  Binary:  assets/gifski_wasm_bg-*.wasm
+  Source:  https://github.com/jamsinclair/gifski-wasm, release 2.2.0
+  Includes gifski (AGPL-3.0-or-later, https://github.com/ImageOptim/gifski),
+  the imagequant crate (GPL-3.0-or-later) and the other Rust crates gifski
+  depends on, each under its own licence.
+
+Mediabunny encoder extensions 1.61.3      MPL-2.0
+  @mediabunny/mp3-encoder, @mediabunny/aac-encoder, @mediabunny/flac-encoder
+  Binary:  assets/mediabunny-{mp3,aac,flac}-encoder-*.js (WASM inlined)
+  Source:  https://github.com/Vanilagy/mediabunny, release v1.61.3,
+           directories packages/mp3-encoder, aac-encoder and flac-encoder
+  The MP3 encoder is LAME 3.100 (LGPL-2.0); the AAC encoder is FFmpeg's
+  native AAC encoder (LGPL-2.1-or-later); the FLAC encoder is libFLAC
+  (BSD-3).
+
+================================================================================
+JavaScript libraries
+================================================================================
+
 Svelte                          MIT          https://github.com/sveltejs/svelte
 Bits UI                         MIT          https://github.com/huntabyte/bits-ui
 Lucide icons                    ISC          https://github.com/lucide-icons/lucide
 Comlink                         Apache-2.0   https://github.com/GoogleChromeLabs/comlink
-Inter (typeface)                OFL-1.1      https://github.com/rsms/inter
+Mediabunny 1.61.3               MPL-2.0      https://github.com/Vanilagy/mediabunny
 Tailwind CSS (generated CSS)    MIT          https://github.com/tailwindlabs/tailwindcss
 file-type                       MIT          https://github.com/sindresorhus/file-type
 ExifReader                      MPL-2.0      https://github.com/mattiasw/ExifReader
 client-zip                      MIT          https://github.com/Touffy/client-zip
-Mediabunny and its encoder
-  extensions (MP3, AAC, FLAC)   MPL-2.0      https://github.com/Vanilagy/mediabunny
-    The extensions include LAME (LGPL-2.0) and parts of FFmpeg (LGPL-2.1).
-wasm-vips                       MIT          https://github.com/kleisauke/wasm-vips
-    Includes libvips (LGPL-2.1), libjpeg-turbo, libpng, libwebp, libheif
-    (LGPL-3.0), libaom, libjxl, libtiff, lcms2, resvg, libimagequant
-    (GPL-3.0), cgif and their dependencies, under their own licences.
-magick-wasm                     Apache-2.0   https://github.com/dlemstra/magick-wasm
-    Includes ImageMagick (ImageMagick licence), LibRaw (LGPL-2.1),
-    libheif, libde265 (LGPL-3.0), OpenJPEG, OpenEXR and their dependencies.
-FFmpeg (ffmpeg.wasm core)       GPL-2.0+     https://github.com/ffmpegwasm/ffmpeg.wasm
-    Built with x264, x265, libvpx, LAME, libvorbis, libopus, libtheora,
-    libwebp, freetype, fribidi, libass and zimg.
-gifski-wasm                     AGPL-3.0+    https://github.com/jamsinclair/gifski-wasm
---------------------------------------------------------------------------------
+
+================================================================================
+Fonts
+================================================================================
+
+Inter                           OFL-1.1      https://github.com/rsms/inter
+Roboto Slab                     Apache-2.0   https://github.com/googlefonts/robotoslab
+Bebas Neue                      OFL-1.1      https://github.com/dharmatype/Bebas-Neue
+Caveat                          OFL-1.1      https://github.com/googlefonts/caveat
+JetBrains Mono                  OFL-1.1      https://github.com/JetBrains/JetBrainsMono
+  Packaged by Fontsource 5.3.0 (https://github.com/fontsource/font-files).
+  The Latin subsets are bundled unmodified.

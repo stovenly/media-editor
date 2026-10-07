@@ -32,6 +32,7 @@ self.addEventListener('activate', (event) => {
             .map((key) => caches.delete(key)),
         ),
       )
+      .then(dropOldEngines)
       .then(() => self.clients.claim()),
   );
 });
@@ -75,6 +76,20 @@ async function receiveShare(request) {
     ),
   );
   return Response.redirect(new URL('./?shared', scope).href, 303);
+}
+
+// Engine files live under wasm/<engine>-<version>/; versions this build no longer uses are deleted.
+async function dropOldEngines() {
+  const cache = await caches.open(ENGINE_CACHE);
+  const current = BUILD.engines.map((dir) => `${enginePrefix}${dir}/`);
+  const requests = await cache.keys();
+  await Promise.all(
+    requests
+      .filter(
+        (request) => !current.some((prefix) => new URL(request.url).pathname.startsWith(prefix)),
+      )
+      .map((request) => cache.delete(request)),
+  );
 }
 
 async function networkFirst(request, fallbackUrl) {

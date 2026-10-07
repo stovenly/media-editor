@@ -11,9 +11,29 @@ const ENGINES = {
     pkg: 'wasm-vips',
     from: 'lib',
     files: ['vips-es6.js', 'vips.wasm', 'vips-jxl.wasm', 'vips-heif.wasm', 'vips-resvg.wasm'],
+    notices: ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'versions.json'],
   },
-  magick: { pkg: '@imagemagick/magick-wasm', from: 'dist/x86', files: ['magick.wasm'] },
-  ffmpeg: { pkg: '@ffmpeg/core', from: 'dist/esm', files: ['ffmpeg-core.js', 'ffmpeg-core.wasm'] },
+  magick: {
+    pkg: '@imagemagick/magick-wasm',
+    from: 'dist/x86',
+    files: ['magick.wasm'],
+    notices: ['LICENSE', 'NOTICE'],
+  },
+  ffmpeg: {
+    pkg: '@ffmpeg/core',
+    from: 'dist/esm',
+    files: ['ffmpeg-core.js', 'ffmpeg-core.wasm'],
+    notices: [],
+    notice: (version) =>
+      [
+        `FFmpeg, built by ffmpeg.wasm core ${version}, is licensed under the GNU General`,
+        'Public License, version 2 or later: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html',
+        '',
+        'Corresponding source, with the pinned versions of FFmpeg and every library in it:',
+        `https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v${version}`,
+        '',
+      ].join('\n'),
+  },
 };
 
 rmSync(out, { recursive: true, force: true });
@@ -29,6 +49,8 @@ for (const [name, engine] of Object.entries(ENGINES)) {
     copyFileSync(source, join(out, dir, file));
     files[file] = statSync(source).size;
   }
+  for (const file of engine.notices) copyFileSync(join(pkgDir, file), join(out, dir, file));
+  if (engine.notice) writeFileSync(join(out, dir, 'NOTICE'), engine.notice(version));
   manifest[name] = { dir, files };
 }
 writeFileSync(join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
