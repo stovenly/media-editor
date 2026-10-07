@@ -246,11 +246,13 @@
   class="relative overflow-x-auto overflow-y-hidden rounded-2xl border border-line bg-surface"
   onscroll={() => (view = { ...view, scroll: scroller.scrollLeft })}
 >
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
     style:width="{duration * pps}px"
     style:height="{height}px"
     role="application"
-    aria-label="Timeline. Click to move the playhead, drag across to select, drag a clip to move it, drag its edges to trim."
+    tabindex="0"
+    aria-label="Timeline. Click to move the playhead, drag across to select, drag a clip to move it, drag its edges to trim. Keys: [ and ] select clips, arrows move the playhead."
     onpointerdown={down}
     onpointermove={move}
     onpointerup={up}

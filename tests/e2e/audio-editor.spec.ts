@@ -38,9 +38,15 @@ test('joins, splits and exports audio', async ({ page }) => {
   const errors = await open(page);
   const clock = page.locator('span.font-mono');
   await expect(clock).toHaveText(/\/ 0:02\.0$/);
-  await page.getByRole('button', { name: 'Join at end' }).first().click();
+  await page
+    .getByRole('button', { name: /^Join .* at the end$/ })
+    .first()
+    .click();
   await expect(clock).toHaveText(/\/ 0:04\.0$/);
-  await page.getByRole('button', { name: 'New track at playhead' }).last().click();
+  await page
+    .getByRole('button', { name: /on a new track at the playhead$/ })
+    .last()
+    .click();
   await expect(page.getByText(/Preparing tone\.wma/)).toBeHidden({ timeout: 60_000 });
 
   await page.getByRole('button', { name: /Split/ }).click();

@@ -150,7 +150,7 @@
       g.beginPath();
       g.rect(left, top, Math.max(0, right - left - 6), ROW - 10);
       g.clip();
-      g.fillStyle = '#ffffff';
+      g.fillStyle = labelOn(colours[b.row]!);
       g.fillText(b.label, left + 6, top + 14);
       g.fillText(`${(b.end - b.start).toFixed(1)} s`, left + 6, top + 28);
       g.restore();
@@ -160,6 +160,17 @@
   });
 
   const MOVABLE: (MovableRow | undefined)[] = [undefined, 'overlay', 'text', 'cue', 'music'];
+  // Black or white, whichever reads better on a #rrggbb fill.
+  function labelOn(fill: string): string {
+    const hex = /^#([0-9a-f]{6})$/i.exec(fill.trim())?.[1];
+    if (!hex) return '#ffffff';
+    const [r, g, b] = [0, 2, 4].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    }) as [number, number, number];
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.18 ? '#000000' : '#ffffff';
+  }
+
   let drag: { block: Block; grab: number; moved: boolean } | null = null;
 
   function locate(event: PointerEvent) {
@@ -215,11 +226,13 @@
   class="overflow-x-auto rounded-2xl border border-line bg-surface"
   onscroll={() => (view = { ...view, scroll: scroller.scrollLeft })}
 >
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
     style:width="{LABEL + duration * pps}px"
     style:height="{HEIGHT}px"
     role="application"
-    aria-label="Video timeline. Click to move the playhead, drag clips to reorder or move them. Arrow keys step through frames."
+    tabindex="0"
+    aria-label="Video timeline. Click to move the playhead, drag clips to reorder or move them. Arrow keys step through frames; [ and ] select the previous or next item."
     onpointerdown={down}
     onpointermove={move}
     onpointerup={up}

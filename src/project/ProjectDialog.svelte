@@ -51,7 +51,12 @@
       </Dialog.Description>
 
       {#if pending}
-        <ul class="max-h-64 space-y-1 overflow-y-auto text-sm" aria-label="Project files">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <ul
+          class="max-h-64 space-y-1 overflow-y-auto text-sm"
+          aria-label="Project files"
+          tabindex="0"
+        >
           {#each pending.saved.assets as asset (asset.id)}
             {@const found = pending.matched.has(asset.id)}
             <li class="flex items-center gap-2">

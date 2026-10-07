@@ -55,7 +55,7 @@
           placeholder="Search formats"
           class="border-b border-line bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted"
         />
-        <Command.List class="overflow-y-auto p-1.5">
+        <Command.List class="overflow-y-auto p-1.5" tabindex={0}>
           <Command.Viewport>
             <Command.Empty class="px-3 py-6 text-center text-sm text-muted"
               >No matching format</Command.Empty

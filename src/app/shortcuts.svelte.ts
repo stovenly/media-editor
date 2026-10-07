@@ -29,6 +29,8 @@ export const SHORTCUTS: Record<ShortcutScreen, { keys: string; action: string }[
   audio: [
     ...EDITING,
     { keys: 'Space', action: 'Play or pause' },
+    { keys: '← / →', action: 'Move the playhead 1 s (Shift: 10 s)' },
+    { keys: '[  /  ]', action: 'Select the previous / next clip' },
     { keys: 'S', action: 'Split at the playhead' },
     { keys: 'Delete', action: 'Delete the selection or clip' },
     { keys: 'Esc', action: 'Close the editor' },
@@ -37,6 +39,7 @@ export const SHORTCUTS: Record<ShortcutScreen, { keys: string; action: string }[
     ...EDITING,
     { keys: 'Space', action: 'Play or pause' },
     { keys: '← / →', action: 'Previous / next frame' },
+    { keys: '[  /  ]', action: 'Select the previous / next item' },
     { keys: 'S', action: 'Split at the playhead' },
     { keys: 'T', action: 'Add text at the playhead' },
     { keys: 'Delete', action: 'Delete the selected item' },

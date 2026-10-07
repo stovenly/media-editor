@@ -112,6 +112,11 @@
 
   const duration = $derived(project ? projectDuration(project) : 0);
   const selected = $derived(project && selectedClip ? findClip(project, selectedClip) : null);
+  const announcement = $derived.by(() => {
+    if (!project || !selected) return '';
+    const { track, clip } = selected;
+    return `Selected ${assetName(clip.assetId)} on track ${project.tracks.indexOf(track) + 1}, ${clip.start.toFixed(1)} to ${(clip.start + clipLength(clip)).toFixed(1)} seconds`;
+  });
 
   const estimate = $derived.by(() => {
     if (!project) return null;
@@ -255,6 +260,21 @@
     } else if (mod && event.key.toLowerCase() === 'y') {
       event.preventDefault();
       history.redo();
+    } else if ((event.key === '[' || event.key === ']') && project) {
+      const clips = project.tracks.flatMap((t) => t.clips).sort((a, b) => a.start - b.start);
+      const at = clips.findIndex((c) => c.id === selectedClip);
+      const next =
+        clips[
+          at < 0 ? (event.key === ']' ? 0 : clips.length - 1) : at + (event.key === ']' ? 1 : -1)
+        ];
+      if (next) {
+        selectedClip = next.id;
+        seek(next.start);
+      }
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      const step = (event.shiftKey ? 10 : 1) * (event.key === 'ArrowLeft' ? -1 : 1);
+      seek(Math.max(0, Math.min(duration, session.position + step)));
     } else if (event.key.toLowerCase() === 's' && !mod) {
       split();
     } else if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -268,6 +288,8 @@
 </script>
 
 <svelte:window onkeydown={keydown} />
+
+<p class="sr-only" aria-live="polite">{announcement}</p>
 
 <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
   <Dialog.Portal>

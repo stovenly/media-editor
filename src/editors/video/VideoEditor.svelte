@@ -39,6 +39,7 @@
     addText,
     appendMain,
     ASPECTS,
+    layout,
     moveMain,
     newVideoProject,
     removeAny,
@@ -102,6 +103,56 @@
   const selectedMusic = $derived(project?.music.find((c) => c.id === selected) ?? null);
   const selectedRedaction = $derived(project?.redactions.find((r) => r.id === selected) ?? null);
   const selectedText = $derived(project?.texts.find((t) => t.id === selected) ?? null);
+
+  // Everything on the timeline in time order, for keyboard selection and announcements.
+  const items = $derived.by(() => {
+    if (!project) return [];
+    const name = (id: string) => session.assets.get(id)?.name ?? '';
+    return [
+      ...layout(project).map((p) => ({
+        id: p.clip.id,
+        start: p.start,
+        end: p.end,
+        label: `Clip ${name(p.clip.assetId)}`,
+      })),
+      ...project.overlay.map((o) => ({
+        id: o.id,
+        start: o.start,
+        end: o.start + o.out - o.in,
+        label: `Overlay ${name(o.assetId)}`,
+      })),
+      ...project.texts.map((t) => ({
+        id: t.id,
+        start: t.start,
+        end: t.start + t.duration,
+        label: `Text ${t.text}`,
+      })),
+      ...project.captions.cues.map((c) => ({
+        id: c.id,
+        start: c.start,
+        end: c.end,
+        label: `Caption ${c.text}`,
+      })),
+      ...project.music.map((m) => ({
+        id: m.id,
+        start: m.start,
+        end: m.start + m.out - m.in,
+        label: `Music ${name(m.assetId)}`,
+      })),
+      ...project.redactions.map((r) => ({
+        id: r.id,
+        start: r.from,
+        end: r.to,
+        label: 'Covered area',
+      })),
+    ].sort((a, b) => a.start - b.start);
+  });
+  const announcement = $derived.by(() => {
+    const item = items.find((i) => i.id === selected);
+    return item
+      ? `Selected ${item.label}, ${item.start.toFixed(1)} to ${item.end.toFixed(1)} seconds`
+      : '';
+  });
 
   let projectMenu = $state<ReturnType<typeof ProjectMenu>>();
 
@@ -342,6 +393,14 @@
     } else if (mod && event.key.toLowerCase() === 'y') {
       event.preventDefault();
       history.redo();
+    } else if (event.key === '[' || event.key === ']') {
+      const forward = event.key === ']';
+      const at = items.findIndex((i) => i.id === selected);
+      const next = items[at < 0 ? (forward ? 0 : items.length - 1) : at + (forward ? 1 : -1)];
+      if (next) {
+        selected = next.id;
+        seek(next.start);
+      }
     } else if (event.key.toLowerCase() === 't' && !mod && project) {
       insertText();
     } else if (event.key.toLowerCase() === 's' && !mod && project) {
@@ -363,6 +422,8 @@
 </script>
 
 <svelte:window onkeydown={keydown} />
+
+<p class="sr-only" aria-live="polite">{announcement}</p>
 
 <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
   <Dialog.Portal>
