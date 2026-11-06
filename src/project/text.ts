@@ -1,5 +1,6 @@
 // Styled text for the video editor: text clips on the timeline and the caption track.
 import type { Cue } from '../captions/cues';
+import type { Rect } from './image-edit';
 
 export type Anchor =
   | 'top-left'
@@ -43,6 +44,8 @@ export type TextClip = {
   text: string;
   start: number; // timeline seconds
   duration: number;
+  lane: number; // timeline layer, 0 at the bottom
+  rect: Rect; // fractions of the output frame; the text wraps to its width
   fadeIn: number;
   fadeOut: number;
   style: TextStyle;

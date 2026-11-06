@@ -61,3 +61,38 @@ test('converts WAV to FLAC', async ({ page }) => {
   const flac = await convert(page, 'tone.wav', 'FLAC');
   expect(ascii(flac, 0, 4)).toBe('fLaC');
 });
+
+test('fits an animated GIF to a file size, with progress all the way', async ({ page }) => {
+  const full = await convert(page, 'long.mp4', 'Animated GIF');
+  const target = (full.length * 0.4) / 1_000_000;
+
+  await page.getByRole('button', { name: 'Clear all' }).click();
+  await page
+    .locator('input[type=file][multiple]')
+    .setInputFiles([
+      { name: 'long.mp4', mimeType: 'video/mp4', buffer: readFileSync(join(FIXTURES, 'long.mp4')) },
+    ]);
+  await page.getByRole('radio', { name: 'Animated GIF', exact: true }).click();
+  const custom = page.getByPlaceholder('Custom');
+  await custom.fill(target.toFixed(3));
+  await custom.blur();
+  await page.getByRole('button', { name: 'Convert', exact: true }).click();
+
+  const seen = new Set<number>();
+  const download = page.getByRole('button', { name: /^Download / });
+  while (!(await download.isVisible())) {
+    const text = await page
+      .locator('article')
+      .getByText(/^\d+%/)
+      .textContent()
+      .catch(() => null);
+    if (text) seen.add(Number.parseInt(text, 10));
+    await page.waitForTimeout(50);
+  }
+  expect([...seen].some((p) => p >= 20 && p <= 80)).toBe(true);
+  await expect(page.getByText(/Made \d+ px wide/)).toBeVisible();
+  const [file] = await Promise.all([page.waitForEvent('download'), download.click()]);
+  const gif = readFileSync(await file.path());
+  expect(ascii(gif, 0, 6)).toBe('GIF89a');
+  expect(gif.length).toBeLessThanOrEqual(target * 1_000_000);
+});

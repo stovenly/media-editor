@@ -48,7 +48,6 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.goto(NATIVE);
       await audit(page, 'empty converter');
       await upload(page, ['gradient.jpg', 'alpha.png', 'clip.mp4', 'tone.mp3', 'captions.srt']);
-      await page.getByRole('button', { name: /^Options/ }).click();
       await page.getByRole('button', { name: /^Combine/ }).click();
       await page.getByRole('button', { name: /^Add subtitles ·/ }).click();
       await audit(page, 'converter with files');
@@ -58,8 +57,16 @@ for (const colorScheme of ['light', 'dark'] as const) {
         .click();
       await audit(page, 'format menu', '[data-popover-content]');
       await page.keyboard.press('Escape');
-      await page.keyboard.press('?');
-      await audit(page, 'shortcuts dialog', '[role=dialog]');
+      for (const [corner, screen] of [
+        ['Display settings', 'display settings'],
+        ['About', 'about'],
+      ] as const) {
+        await page.getByRole('button', { name: corner }).click();
+        await page
+          .locator('.pop-in')
+          .evaluate((pop) => Promise.all(pop.getAnimations().map((a) => a.finished)));
+        await audit(page, screen);
+      }
     });
 
     test('image editor', async ({ page }) => {

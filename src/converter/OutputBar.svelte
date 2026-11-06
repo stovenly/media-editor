@@ -1,72 +1,51 @@
 <script lang="ts">
   import { suggestions, target } from '../engine/targets';
-  import type { MediaKind } from '../io/formats';
-  import { factsOf, files } from './files.svelte';
+  import { factsOf, files, type FileItem } from './files.svelte';
   import TargetMenu from './TargetMenu.svelte';
 
-  const KIND_LABELS: Record<MediaKind, string> = {
-    image: 'Images',
-    video: 'Videos',
-    audio: 'Audio',
-    subtitle: 'Subtitles',
-  };
+  let { item }: { item: FileItem } = $props();
 
-  const rows = $derived(
-    files.kinds().map((kind) => {
-      const counts = new Map<string, number>();
-      const facts = { animated: false, motion: false, subtitles: false };
-      for (const item of files.items) {
-        const format = item.inspection?.sniffed.format;
-        if (item.inspection?.sniffed.kind !== kind || !format) continue;
-        counts.set(format, (counts.get(format) ?? 0) + 1);
-        const f = factsOf(item.inspection);
-        facts.animated ||= Boolean(f.animated);
-        facts.motion ||= Boolean(f.motion);
-        facts.subtitles ||= Boolean(f.subtitles);
-      }
-      const common = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
-      const chips = suggestions(common, kind, facts);
-      const chosen = files.defaults[kind];
-      if (chosen && !chips.some((t) => t.id === chosen)) chips.push(target(chosen));
-      return { kind, chips, chosen, facts };
-    }),
-  );
+  const KIND_NAMES = {
+    image: 'image',
+    video: 'video',
+    audio: 'audio',
+    subtitle: 'subtitle',
+  } as const;
+
+  const kind = $derived(item.inspection!.sniffed.kind!);
+  const facts = $derived(factsOf(item.inspection));
+  const chosen = $derived(files.targetOf(item));
+  const chips = $derived.by(() => {
+    const list = suggestions(item.inspection?.sniffed.format ?? '', kind, facts);
+    if (chosen && !list.some((t) => t.id === chosen)) list.push(target(chosen));
+    return list;
+  });
 </script>
 
-<div class="space-y-3 rounded-2xl border border-line bg-raised p-4 shadow-xs">
-  {#each rows as row (row.kind)}
-    <div class="flex flex-wrap items-center gap-2">
-      <span class="w-full text-sm font-medium text-muted sm:w-auto sm:min-w-28">
-        {rows.length > 1 ? `${KIND_LABELS[row.kind]} to` : 'Convert to'}
-      </span>
-      <div
-        class="flex flex-wrap items-center gap-1.5"
-        role="radiogroup"
-        aria-label="{KIND_LABELS[row.kind]} output"
+<div class="space-y-3 p-5">
+  <span class="block text-sm font-semibold">Convert to</span>
+  <div class="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Output format">
+    {#each chips as chip (chip.id)}
+      <button
+        type="button"
+        role="radio"
+        aria-checked={chosen === chip.id}
+        title={chip.hint}
+        class="rounded-full border px-3 py-1.5 text-sm font-medium transition-colors {chosen ===
+        chip.id
+          ? 'border-accent bg-accent text-on-accent'
+          : 'border-line bg-raised hover:border-accent hover:text-accent'}"
+        onclick={() => files.setTarget(item.id, chip.id)}
       >
-        {#each row.chips as chip (chip.id)}
-          <button
-            type="button"
-            role="radio"
-            aria-checked={row.chosen === chip.id}
-            title={chip.hint}
-            class="rounded-full border px-3 py-1.5 text-sm font-medium transition-colors {row.chosen ===
-            chip.id
-              ? 'border-accent bg-accent text-on-accent'
-              : 'border-line bg-raised hover:border-accent hover:text-accent'}"
-            onclick={() => files.setDefault(row.kind, chip.id)}
-          >
-            {chip.label}
-          </button>
-        {/each}
-        <TargetMenu
-          kind={row.kind}
-          facts={row.facts}
-          value={row.chosen}
-          label="More {KIND_LABELS[row.kind].toLowerCase()} formats"
-          onPick={(id) => files.setDefault(row.kind, id)}
-        />
-      </div>
-    </div>
-  {/each}
+        {chip.label}
+      </button>
+    {/each}
+    <TargetMenu
+      {kind}
+      {facts}
+      value={chosen}
+      label="More {KIND_NAMES[kind]} formats"
+      onPick={(id) => files.setTarget(item.id, id)}
+    />
+  </div>
 </div>

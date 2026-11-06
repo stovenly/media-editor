@@ -6,10 +6,12 @@
   let {
     style,
     fonts,
+    placement = true,
     onChange,
     onAddFont,
   }: {
     style: TextStyle;
+    placement?: boolean;
     fonts: readonly ProjectFont[];
     onChange: (label: string, style: TextStyle) => void;
     onAddFont: (file: File) => Promise<string | null>;
@@ -191,30 +193,32 @@
     {/if}
   </div>
 
-  <fieldset class="space-y-1">
-    <legend class="text-xs">Position</legend>
-    <div class="grid grid-cols-3 gap-1 text-xs">
-      {#each ANCHORS as anchor (anchor)}
-        <button
-          type="button"
-          class="rounded-lg border px-1 py-1 {style.anchor === anchor
-            ? 'border-accent bg-accent-soft text-accent'
-            : 'border-line'}"
-          aria-pressed={style.anchor === anchor}
-          onclick={() => set('Position', { anchor })}>{ANCHOR_LABELS[anchor]}</button
-        >
-      {/each}
-    </div>
-  </fieldset>
-  <label class="grid gap-1 text-xs"
-    >Distance from the edge<input
-      type="range"
-      min="0"
-      max="0.25"
-      step="0.005"
-      value={style.margin}
-      class="accent-accent"
-      oninput={(e) => set('Margin', { margin: num(e) })}
-    /></label
-  >
+  {#if placement}
+    <fieldset class="space-y-1">
+      <legend class="text-xs">Position</legend>
+      <div class="grid grid-cols-3 gap-1 text-xs">
+        {#each ANCHORS as anchor (anchor)}
+          <button
+            type="button"
+            class="rounded-lg border px-1 py-1 {style.anchor === anchor
+              ? 'border-accent bg-accent-soft text-accent'
+              : 'border-line hover:border-accent hover:text-accent'}"
+            aria-pressed={style.anchor === anchor}
+            onclick={() => set('Position', { anchor })}>{ANCHOR_LABELS[anchor]}</button
+          >
+        {/each}
+      </div>
+    </fieldset>
+    <label class="grid gap-1 text-xs"
+      >Distance from the edge<input
+        type="range"
+        min="0"
+        max="0.25"
+        step="0.005"
+        value={style.margin}
+        class="accent-accent"
+        oninput={(e) => set('Margin', { margin: num(e) })}
+      /></label
+    >
+  {/if}
 </div>

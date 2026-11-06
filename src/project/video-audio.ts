@@ -1,32 +1,47 @@
 // The sound of a video project, as an audio project the audio renderer can play and export.
 import type { AudioClip, AudioProject } from './audio';
-import { layout, type VideoAsset, type VideoProject } from './video';
+import { clipEnd, type VideoAsset, type VideoProject } from './video';
 
 export function soundOf(
   project: VideoProject,
   assets: ReadonlyMap<string, VideoAsset>,
 ): AudioProject {
+  // A clip fading in over the tail of another one crossfades their sound too.
   const main: AudioClip[] = [];
-  const placed = layout(project);
-  placed.forEach(({ clip, start }, index) => {
+  for (const clip of project.main) {
     const asset = assets.get(clip.assetId);
-    if (!asset?.hasAudio || clip.muted) return;
-    const previous = placed[index - 1];
-    const next = placed[index + 1];
-    const fadeIn = Math.max(clip.fadeIn, previous ? previous.end - start : 0);
-    const fadeOut = Math.max(clip.fadeOut, next ? placed[index]!.end - next.start : 0);
+    if (!asset?.hasAudio || clip.muted) continue;
+    const end = clipEnd(clip);
+    let fadeOut = clip.fadeOut;
+    for (const next of project.main) {
+      if (next.id !== clip.id && next.fadeIn > 0 && next.start > clip.start && next.start < end)
+        fadeOut = Math.max(fadeOut, end - next.start);
+    }
     main.push({
       id: clip.id,
       assetId: clip.assetId,
-      start,
+      start: clip.start,
       in: clip.in,
       out: clip.out,
       gain: clip.volume,
-      fadeIn,
+      fadeIn: clip.fadeIn,
       fadeOut,
       speed: clip.speed,
     });
-  });
+  }
+  for (const overlay of project.overlay) {
+    if (!assets.get(overlay.assetId)?.hasAudio || overlay.muted) continue;
+    main.push({
+      id: overlay.id,
+      assetId: overlay.assetId,
+      start: overlay.start,
+      in: overlay.in,
+      out: overlay.out,
+      gain: overlay.volume,
+      fadeIn: 0,
+      fadeOut: 0,
+    });
+  }
   const music: AudioClip[] = project.music.map((m) => ({
     id: m.id,
     assetId: m.assetId,

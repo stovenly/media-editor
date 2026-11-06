@@ -18,7 +18,7 @@ test('zooming in shows full-resolution pixels from the original', async ({ page 
   await expect(dialog.getByText('4000×3000')).toBeVisible({ timeout: 30_000 });
   await expect(dialog.getByRole('button', { name: /Show at 100%/ })).toHaveText(/^Fit · /);
 
-  await page.keyboard.press('0');
+  await dialog.getByRole('button', { name: 'Show at 100%' }).click();
   await expect(dialog.getByRole('button', { name: /Fit to the window/ })).toHaveText('100%');
   const sharp = dialog.locator('canvas.pointer-events-none');
   await expect(sharp).toBeVisible({ timeout: 30_000 });
@@ -37,9 +37,7 @@ test('zooming in shows full-resolution pixels from the original', async ({ page 
   expect(extremes.low).toBeLessThan(20);
   expect(extremes.high).toBeGreaterThan(235);
 
-  await page.keyboard.press('-');
-  await page.keyboard.press('-');
-  await page.keyboard.press('-');
+  for (let i = 0; i < 3; i++) await dialog.getByRole('button', { name: 'Zoom out' }).click();
   await expect(dialog.getByRole('button', { name: /Show at 100%/ })).toHaveText(/^Fit · /);
   await expect(sharp).toBeHidden();
 });

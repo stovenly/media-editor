@@ -73,13 +73,23 @@ for (const container of ['MP4', 'WebM'] as const) {
     await expect(page.getByRole('list', { name: 'Captions' }).getByRole('button')).toHaveCount(2);
     await page.getByRole('button', { name: /^Text$/ }).click();
     await page.getByRole('textbox', { name: 'Text', exact: true }).fill('HELLO');
-    await page.getByRole('button', { name: 'Top', exact: true }).click();
+    const preview = (await page
+      .getByRole('img', { name: 'Preview' })
+      .or(page.getByLabel('Preview'))
+      .first()
+      .boundingBox())!;
+    const box = (await page.getByRole('group', { name: /^Text box/ }).boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - preview.height * 0.35, {
+      steps: 5,
+    });
+    await page.mouse.up();
     await page.getByLabel('Also add a subtitle track').check();
     await page.getByPlaceholder('eng').last().fill('eng');
     await page.getByPlaceholder('eng').last().blur();
 
-    await page.getByRole('application', { name: /Video timeline/ }).focus();
-    for (let i = 0; i < 15; i++) await page.keyboard.press('ArrowRight');
+    for (let i = 0; i < 15; i++) await page.getByRole('button', { name: 'Next frame' }).click();
     await expect(clock).toHaveText(/^0:00\.50/);
     const still = frameAt(
       await download(page, page.getByRole('button', { name: 'Save frame' })),
@@ -96,7 +106,8 @@ for (const container of ['MP4', 'WebM'] as const) {
       meanDifference(frameAt(exported, t), still),
     );
 
-    expect(Math.min(...near)).toBe(near[2]);
+    // 25 fps under a 30 fps export: neighbouring output frames can show the same source frame.
+    expect(near[2]).toBeLessThan(Math.min(...near) + 1);
     expect(near[2]).toBeLessThan(10);
     expect(meanDifference(still, plain, [0, 50])).toBeGreaterThan(10);
     expect(meanDifference(still, plain, [H - 50, H])).toBeGreaterThan(10);

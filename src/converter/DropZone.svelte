@@ -1,15 +1,12 @@
 <script lang="ts">
   import { FolderOpen, ShieldCheck, Upload } from '@lucide/svelte';
+  import { PICKER_ACCEPT } from '../io/formats';
 
   let { onFiles, compact = false }: { onFiles: (files: File[]) => void; compact?: boolean } =
     $props();
 
   let filePicker: HTMLInputElement;
   let folderPicker: HTMLInputElement;
-
-  export function pick() {
-    filePicker.click();
-  }
 
   function picked(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
@@ -18,7 +15,14 @@
   }
 </script>
 
-<input bind:this={filePicker} type="file" multiple hidden onchange={picked} />
+<input
+  bind:this={filePicker}
+  type="file"
+  multiple
+  accept={PICKER_ACCEPT}
+  hidden
+  onchange={picked}
+/>
 <input bind:this={folderPicker} type="file" webkitdirectory hidden onchange={picked} />
 
 {#if compact}

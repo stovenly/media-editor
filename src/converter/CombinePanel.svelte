@@ -30,14 +30,14 @@
   });
 </script>
 
-<Collapsible.Root bind:open class="rounded-2xl border border-line bg-raised shadow-xs">
-  <Collapsible.Trigger class="flex w-full items-center gap-2 px-4 py-3 text-left text-sm">
+<Collapsible.Root bind:open>
+  <Collapsible.Trigger class="flex w-full items-center gap-2 px-5 py-4 text-left text-sm">
     <ChevronRight size={16} class="text-muted transition-transform {open ? 'rotate-90' : ''}" />
     <Layers size={15} class="text-muted" />
     <span class="font-medium">Combine</span>
     <span class="truncate text-muted">· {summary}</span>
   </Collapsible.Trigger>
-  <Collapsible.Content class="grid gap-4 border-t border-line px-4 py-4 text-sm sm:grid-cols-3">
+  <Collapsible.Content class="grid gap-4 px-5 pb-5 text-sm">
     <label class="grid gap-1.5">
       <span class="font-medium">Make</span>
       <select
@@ -84,7 +84,7 @@
         </select>
       </label>
     {/if}
-    <div class="flex flex-wrap items-center gap-3 sm:col-span-3">
+    <div class="flex flex-wrap items-center gap-3">
       <p class="flex-1 text-muted">
         {#if job.status === 'running'}
           <span class="inline-flex items-center gap-1.5"

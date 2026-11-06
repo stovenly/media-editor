@@ -24,8 +24,19 @@
   import { factsOf, files, type FileItem } from './files.svelte';
   import TargetMenu from './TargetMenu.svelte';
 
-  let { item, onDetails, onEdit }: { item: FileItem; onDetails: () => void; onEdit: () => void } =
-    $props();
+  let {
+    item,
+    selected,
+    onSelect,
+    onDetails,
+    onEdit,
+  }: {
+    item: FileItem;
+    selected: boolean;
+    onSelect: () => void;
+    onDetails: () => void;
+    onEdit: () => void;
+  } = $props();
 
   const icons = { image: Image, audio: Music, video: Film, subtitle: Captions };
   const kind = $derived(item.inspection?.sniffed.kind ?? null);
@@ -80,11 +91,11 @@
     const i = item.inspection;
     if (!i || !out) return [];
     const list: string[] = [];
-    if ((i.metadata?.location || i.av?.tags.location) && files.options.metadata !== 'all')
+    if ((i.metadata?.location || i.av?.tags.location) && item.options.metadata !== 'all')
       list.push('Location data found · will be removed');
     const bytes = item.estimate?.bytes;
     if (bytes && targetId) {
-      const engine = i.av ? routeAv(i.av, avSettings(targetId, files.options)) : 'native';
+      const engine = i.av ? routeAv(i.av, avSettings(targetId, item.options)) : 'native';
       if (bytes > outputWarnLimit(platform, engine))
         list.push('This may be too large for your browser');
     }
@@ -108,11 +119,16 @@
   }
 </script>
 
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 <article
-  class="relative flex h-full items-center gap-3 overflow-hidden rounded-2xl border border-line bg-raised px-3 shadow-xs sm:gap-4 sm:px-4"
+  class="relative flex h-full cursor-pointer items-center gap-4 overflow-hidden border-b border-line px-4 {selected
+    ? 'bg-accent-soft shadow-[inset_3px_0_0_var(--accent)]'
+    : 'hover:bg-surface'}"
+  aria-current={selected}
+  onclick={onSelect}
 >
   <div
-    class="grid size-12 shrink-0 place-items-center overflow-hidden rounded-xl {thumbUrl
+    class="grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg {thumbUrl
       ? 'checkerboard'
       : item.status === 'ready'
         ? 'bg-accent-soft text-accent'
@@ -127,7 +143,13 @@
 
   <div class="min-w-0 flex-1">
     <div class="flex items-center gap-2">
-      <p class="min-w-0 truncate font-medium" title={item.file.name}>{item.file.name}</p>
+      <button
+        type="button"
+        class="min-w-0 truncate text-left font-medium"
+        title={item.file.name}
+        aria-label="Settings for {item.file.name}"
+        onclick={onSelect}>{item.file.name}</button
+      >
       {#if kind && item.status === 'ready'}
         <TargetMenu
           {kind}
@@ -156,12 +178,14 @@
           ><CircleAlert size={13} /> Couldn't read this file · {item.error}</span
         >
       {:else if job.status === 'failed' && current}
-        <span class="text-danger" title={job.detail}>{job.message}</span>
+        <span class="inline-flex items-center gap-1.5 text-danger" title={job.message}
+          ><CircleAlert size={13} /> Couldn't convert</span
+        >
       {:else if job.status === 'done' && current}
         {@const done = [
           ...notes,
           ...((item.inspection?.metadata?.location || item.inspection?.av?.tags.location) &&
-          files.options.metadata !== 'all'
+          item.options.metadata !== 'all'
             ? ['Location data removed']
             : []),
         ]}
@@ -188,11 +212,8 @@
     {:else if job.status === 'running' && current}
       <span class="tabular-nums text-muted">
         {#if measured}
-          {Math.round(progress * 100)}%{#if remaining !== null && remaining > 2}<span
-              class="hidden sm:inline"
-            >
-              · {formatDuration(remaining)} left</span
-            >{/if}
+          {Math.round(progress * 100)}%{#if remaining !== null && remaining > 2}
+            · {formatDuration(remaining)} left{/if}
         {:else}
           Converting…
         {/if}
@@ -219,7 +240,7 @@
         aria-label="Download {job.output.name}"
         onclick={() => job.status === 'done' && downloadBlob(job.output.blob, job.output.name)}
       >
-        <Download size={15} /> <span class="hidden sm:inline">Download</span>
+        <Download size={15} /> Download
       </button>
     {:else if job.status === 'failed' && current}
       <button
@@ -230,7 +251,7 @@
         <RotateCcw size={14} /> Retry
       </button>
     {:else if item.estimate && item.estimate.key === key}
-      <span class="tabular-nums text-muted max-sm:hidden" title="Estimated size">
+      <span class="tabular-nums text-muted" title="Estimated size">
         {#if item.estimate.bytes === null}<LoaderCircle
             size={14}
             class="animate-spin"
@@ -242,7 +263,7 @@
         type="button"
         class="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors hover:border-accent hover:text-accent {item.edit
           ? 'border-accent bg-accent-soft text-accent'
-          : 'border-line'}"
+          : 'border-line hover:border-accent hover:text-accent'}"
         aria-label="Edit {item.file.name}"
         onclick={onEdit}><Pencil size={14} /> {item.edit ? 'Edited' : 'Edit'}</button
       >
@@ -250,7 +271,7 @@
     {#if item.status === 'ready'}
       <button
         type="button"
-        class="icon-button max-sm:hidden"
+        class="icon-button"
         aria-label="Details for {item.file.name}"
         onclick={onDetails}><Info size={16} /></button
       >

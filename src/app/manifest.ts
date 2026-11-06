@@ -1,22 +1,5 @@
 // The web app manifest, built from the format table so "Open with" lists exactly what the converter reads.
-import { FORMATS, type MediaKind } from '../io/formats.ts';
-
-// Format ids whose usual file extensions differ from the id.
-const EXTENSIONS: Record<string, string[]> = {
-  jpeg: ['jpg', 'jpeg', 'jfif'],
-  tiff: ['tif', 'tiff'],
-  pnm: ['pnm', 'ppm', 'pgm', 'pbm', 'pam'],
-  sun: ['ras'],
-  fits: ['fits', 'fit'],
-  heic: ['heic', 'heif'],
-  jp2: ['jp2', 'j2k', 'jpx'],
-  mts: ['mts', 'm2ts', 'ts'],
-  mpg: ['mpg', 'mpeg'],
-  aiff: ['aiff', 'aif'],
-  ogg: ['ogg', 'oga'],
-  ass: ['ass', 'ssa'],
-  apng: [],
-};
+import { extensionsOf, FORMATS, type MediaKind } from '../io/formats.ts';
 
 const MIME_GROUP: Record<MediaKind, string> = {
   image: 'image/*',
@@ -29,7 +12,7 @@ export function webManifest(): string {
   const accept: Record<string, string[]> = {};
   for (const [id, info] of Object.entries(FORMATS)) {
     const list = (accept[MIME_GROUP[info.kind]] ??= []);
-    for (const ext of EXTENSIONS[id] ?? [id]) if (!list.includes(`.${ext}`)) list.push(`.${ext}`);
+    for (const ext of extensionsOf(id)) if (!list.includes(`.${ext}`)) list.push(`.${ext}`);
   }
   return JSON.stringify(
     {

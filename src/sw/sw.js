@@ -110,11 +110,26 @@ async function networkFirst(request, fallbackUrl) {
 async function cacheFirst(request, cacheName) {
   const cached = await caches.match(request);
   if (cached) return withHeaders(cached, request);
-  const response = await fetch(request);
+  let response;
+  try {
+    response = await fetch(request);
+  } catch {
+    return unreachable(request);
+  }
   if (response.ok) {
     const cache = await caches.open(cacheName);
     await cache.put(request, response.clone());
   }
+  return withHeaders(response, request);
+}
+
+// Contract with src/engine/downloads.svelte.ts: this header marks a file the host could not be reached for.
+function unreachable(request) {
+  const response = new Response(null, {
+    status: 503,
+    statusText: 'Host unreachable',
+    headers: { 'X-Host-Unreachable': '1' },
+  });
   return withHeaders(response, request);
 }
 

@@ -55,6 +55,7 @@ test('converts a long-tail format through the extra engine and builds a ZIP of t
   await page.goto(NATIVE);
   await pick(page, 'alpha.tga', 'gradient.bmp', 'alpha.psd');
   await page.getByRole('radio', { name: 'PNG' }).click();
+  await page.getByRole('button', { name: 'Use these settings for the other 2 images' }).click();
   await page.getByRole('button', { name: 'Convert 3 files' }).click();
   await expect(page.getByRole('button', { name: /^Download .*\.png$/ })).toHaveCount(3, {
     timeout: 90_000,
@@ -91,4 +92,25 @@ test('keeps every frame of an animation', async ({ page }) => {
   await page.getByRole('button', { name: 'Convert', exact: true }).click();
   const webp = await downloaded(page, 'anim.webp');
   expect(webp.toString('latin1').split('ANMF').length - 1).toBe(3);
+});
+
+test('resizes an animated GIF and keeps it animated', async ({ page }) => {
+  await page.goto(NATIVE);
+  await pick(page, 'anim.gif');
+  await expect(page.getByRole('radio', { name: 'Animated GIF' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await expect(page.getByText('Only the first frame will be kept')).toHaveCount(0);
+  await expect(page.getByRole('slider', { name: 'Quality' })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Image size' }).selectOption('custom');
+  const width = page.getByRole('spinbutton', { name: 'Image size in pixels' });
+  await width.fill('32');
+  await width.blur();
+  await page.getByRole('button', { name: 'Convert', exact: true }).click();
+  const gif = await downloaded(page, 'anim.gif');
+  expect(gif.subarray(0, 6).toString('latin1')).toBe('GIF89a');
+  expect(gif.readUInt16LE(6)).toBe(32);
+  const frames = gif.toString('latin1').split('\x21\xf9\x04').length - 1;
+  expect(frames).toBe(3);
 });

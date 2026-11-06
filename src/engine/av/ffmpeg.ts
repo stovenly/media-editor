@@ -5,6 +5,7 @@ type LogEvent = { type: string; message: string };
 
 type Core = {
   exec(...args: string[]): number;
+  reset(): void;
   setLogger(logger: (event: LogEvent) => void): void;
   // progress: 0..1 against the input's duration; time: output position in microseconds.
   setProgress(handler: (event: { progress: number; time: number }) => void): void;
@@ -61,18 +62,48 @@ export async function runFfmpeg(
     if (log.length > 40) log.shift();
   });
   // FFmpeg's own status line ends in a carriage return, so it never reaches the logger until the end.
+  // Each command of the job gets an equal share of the progress, measured by the output's time or, when
+  // that stands still, by how much of the input has been read.
+  const commands = [...(job.before ?? []), job.args];
+  let pass = 0;
+  let shown = 0;
+  const show = (fraction: number) => {
+    const overall = Math.min(0.99, (pass + Math.min(1, fraction)) / commands.length);
+    if (overall < shown + 0.005) return;
+    shown = overall;
+    onProgress(overall);
+  };
   core.setProgress(({ progress, time }) => {
     const fraction = duration && time > 0 ? time / 1_000_000 / duration : progress;
-    if (Number.isFinite(fraction) && fraction > 0) onProgress(Math.min(0.99, fraction));
+    if (Number.isFinite(fraction) && fraction > 0) show(fraction);
+  });
+
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  let read = 0;
+  const tracked = files.map((file) => {
+    const copy = new File([file], file.name, { type: file.type, lastModified: file.lastModified });
+    const slice = copy.slice.bind(copy);
+    // WORKERFS reads by slicing the file, synchronously inside exec.
+    copy.slice = (start?: number, end?: number, type?: string) => {
+      read += Math.max(0, (end ?? copy.size) - (start ?? 0));
+      if (total) show(read / total);
+      return slice(start, end, type);
+    };
+    return copy;
   });
 
   core.FS.mkdir('/in');
-  core.FS.mount(core.FS.filesystems.WORKERFS, { files }, '/in');
+  core.FS.mount(core.FS.filesystems.WORKERFS, { files: tracked }, '/in');
   for (const write of writes) core.FS.writeFile(write.path, write.data);
   core.FS.mkdir('/out');
   if (job.zip) core.FS.mkdir(job.zip);
-  const code = core.exec(...job.args);
-  if (code !== 0) throw new Error(failureFrom(log));
+  for (const command of commands) {
+    const code = core.exec(...command);
+    if (code !== 0) throw new Error(failureFrom(log));
+    core.reset();
+    pass++;
+    read = 0;
+  }
   let bytes: Uint8Array;
   if (job.zip) {
     const dir = job.zip;

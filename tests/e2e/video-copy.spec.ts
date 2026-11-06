@@ -46,47 +46,85 @@ const meanDifference = (a: Buffer, b: Buffer) => {
   return sum / a.length;
 };
 
-async function seekTo(page: Page, frames: number) {
-  await page.getByRole('application', { name: /Video timeline/ }).focus();
-  await page.keyboard.press('Home');
-  for (let i = 0; i < frames; i++) await page.keyboard.press('ArrowRight');
+async function forward(page: Page, frames: number) {
+  for (let i = 0; i < frames; i++) await page.getByRole('button', { name: 'Next frame' }).click();
 }
 
-test('cut-only edits export by copying, with cuts on key frames', async ({ page, browserName }) => {
-  test.skip(browserName === 'webkit', 'Video editing needs WebCodecs');
-  test.setTimeout(120_000);
+async function open(page: Page, name: string) {
   await page.goto(NATIVE);
   await page.locator('input[type=file][multiple]').setInputFiles({
-    name: 'keyed.mp4',
+    name,
     mimeType: 'video/mp4',
-    buffer: readFileSync(join(FIXTURES, 'keyed.mp4')),
+    buffer: readFileSync(join(FIXTURES, name)),
   });
-  await page.getByRole('button', { name: 'Edit keyed.mp4' }).click();
+  await page.getByRole('button', { name: `Edit ${name}` }).click();
   const clock = page.locator('span.font-mono.tabular-nums').first();
   await expect(clock).toHaveText(/\/ 0:02\.00$/, { timeout: 30_000 });
+  // Timeline layout: 100 px of labels, 30 px per second, main row centred at 44 px.
+  const timeline = page.getByRole('application', { name: /Video timeline/ });
+  await timeline.scrollIntoViewIfNeeded();
+  const box = (await timeline.locator('canvas').boundingBox())!;
+  return { clock, at: (seconds: number) => ({ x: box.x + 100 + seconds * 30, y: box.y + 44 }) };
+}
 
-  // Keep 0–0.6 s and 1.4–2 s; key frames are every 0.4 s, so the copy keeps 0–0.8 s and 1.2–2 s.
-  await seekTo(page, 18);
-  await page.keyboard.press('s');
-  await seekTo(page, 42);
-  await page.keyboard.press('s');
-  await page.keyboard.press(']');
-  await page.keyboard.press(']');
-  await page.keyboard.press('Delete');
-  await expect(clock).toHaveText(/\/ 0:01\.20$/);
+async function drag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }) {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  await page.mouse.up();
+}
 
-  await expect(page.getByLabel(/Fast export without re-encoding/)).toBeChecked();
+async function exported(page: Page): Promise<string> {
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const button = page.getByRole('button', { name: /^Download / });
   await expect(button).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByText(/Cuts moved to the nearest key frames: 1\.60 s/)).toBeVisible();
   const [file] = await Promise.all([page.waitForEvent('download'), button.click()]);
-  const path = await file.path();
+  return file.path();
+}
 
+test('cuts on key frames export by copying', async ({ page, browserName }) => {
+  test.skip(browserName === 'webkit', 'Video editing needs WebCodecs');
+  test.setTimeout(120_000);
+  const { clock, at } = await open(page, 'keyed.mp4');
+
+  // Key frames are every 0.4 s: keep 0–0.8 s and 1.2–2 s.
+  const split = page.getByRole('button', { name: 'Split', exact: true });
+  await forward(page, 24);
+  await split.click();
+  await forward(page, 12);
+  await split.click();
+  await page.mouse.click(at(1).x, at(1).y);
+  await page.keyboard.press('Delete');
+  await drag(page, at(1.6), at(1.2));
+  await expect(clock).toHaveText(/\/ 0:01\.60$/);
+
+  await expect(page.getByLabel(/Fast export without re-encoding/)).toBeChecked();
+  const path = await exported(page);
+  await expect(
+    page.getByText('Copied without re-encoding, so there is no quality loss'),
+  ).toBeVisible();
   const info = probe(path);
   expect(Number(info.format.duration)).toBeCloseTo(1.6, 1);
   expect(info.streams.map((s) => s.codec_name).sort()).toEqual(['aac', 'h264']);
   const source = join(FIXTURES, 'keyed.mp4');
   expect(meanDifference(frameAt(path, 0.5), frameAt(source, 0.5))).toBeLessThan(0.5);
   expect(meanDifference(frameAt(path, 1.0), frameAt(source, 1.4))).toBeLessThan(0.5);
+});
+
+test('a trim between key frames is re-encoded to land exactly', async ({ page, browserName }) => {
+  test.skip(browserName === 'webkit', 'Video editing needs WebCodecs');
+  test.setTimeout(120_000);
+  const { clock, at } = await open(page, 'clip.mp4');
+  await drag(page, { x: at(0).x + 1, y: at(0).y }, at(1));
+  await expect(clock).toHaveText(/\/ 0:02\.00$/);
+
+  await expect(page.getByLabel(/Fast export without re-encoding/)).toBeChecked();
+  const path = await exported(page);
+  await expect(page.getByText(/Re-encoded so the cuts land exactly/)).toBeVisible();
+  expect(Number(probe(path).format.duration)).toBeCloseTo(1, 1);
+  const source = join(FIXTURES, 'clip.mp4');
+  const first = frameAt(path, 0.2);
+  expect(meanDifference(first, frameAt(source, 1.2))).toBeLessThan(
+    meanDifference(first, frameAt(source, 0.2)) * 0.75,
+  );
 });

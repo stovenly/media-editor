@@ -17,10 +17,14 @@ import { stillImage, VideoFrames, type Drawable } from '../engine/video/frames';
 import { copyableCuts, type AssetKind, type VideoAsset, type VideoProject } from '../project/video';
 import { attachProgress, reportProgress } from './progress';
 
+type Reader = { frames: Promise<VideoFrames | null>; use: string | null; frame: number };
+type Readers = Reader[];
+
 type Entry = {
   info: VideoAsset;
   file: File;
   frames: VideoFrames | null;
+  readers: Readers; // preview decoders; the first wraps `frames`
   still: Drawable | null;
   audio: AssetHandle | null;
 };
@@ -28,18 +32,38 @@ type Entry = {
 const entries = new Map<string, Entry>();
 let canvas: OffscreenCanvas | null = null;
 let compositor: Compositor | null = null;
+const back = new OffscreenCanvas(1, 1);
 let playing = 0;
 
-function lookup(frames: (entry: Entry) => VideoFrames | null): FrameLookup {
-  return async (assetId, time) => {
+// A use keeps its decoder while it stays on screen; a decoder idle this frame is handed to a new use, and
+// another is opened only when every decoder is busy this frame.
+function lookup(readersOf: (entry: Entry) => Readers | undefined): FrameLookup {
+  let frame = 0;
+  const find = async (assetId: string, time: number, use: string) => {
     const entry = entries.get(assetId);
     if (!entry) return null;
     if (entry.still) return entry.still;
-    return (await frames(entry)?.at(time)) ?? null;
+    const readers = readersOf(entry);
+    if (!readers?.length) return null;
+    let reader = readers.find((r) => r.use === use) ?? readers.find((r) => r.frame < frame);
+    if (!reader) {
+      reader = { frames: VideoFrames.open(entry.file).catch(() => null), use, frame };
+      readers.push(reader);
+    }
+    reader.use = use;
+    reader.frame = frame;
+    return (await (await reader.frames)?.at(time)) ?? null;
   };
+  return Object.assign(find, { begin: () => void frame++ });
 }
 
-const preview = lookup((entry) => entry.frames);
+const reader = (frames: VideoFrames | null): Reader => ({
+  frames: Promise.resolve(frames),
+  use: null,
+  frame: -1,
+});
+
+const preview = lookup((entry) => entry.readers);
 
 const fontLoads = new Map<string, Promise<void>>();
 
@@ -73,11 +97,17 @@ async function draw(project: VideoProject, time: number, maxEdge: number): Promi
   const scale = Math.min(1, maxEdge / Math.max(project.width, project.height));
   const width = Math.round(project.width * scale);
   const height = Math.round(project.height * scale);
+  if (back.width !== width || back.height !== height) {
+    back.width = width;
+    back.height = height;
+  }
+  await compositor.draw(project, time, preview, scale);
+  // The visible canvas changes only here, in one step, so a slow frame never shows half drawn.
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
   }
-  await compositor.draw(project, time, preview, scale);
+  canvas.getContext('2d')!.drawImage(back, 0, 0);
 }
 
 const api = {
@@ -99,18 +129,28 @@ const api = {
           if (kind !== 'image') audio = await openAsset(file).catch(() => null);
           const first = still ?? (frames ? await frames.at(0) : null);
           const sideways = first && (first.rotation === 90 || first.rotation === 270);
+          const probe = frames ? await probeVideo(file) : null;
           const info: VideoAsset = {
             id,
             name,
             kind,
-            duration: frames ? await durationOf(file) : (audio?.duration ?? 0),
+            duration: probe?.duration ?? audio?.duration ?? 0,
+            fps: probe?.fps ?? 0,
+            bitrate: probe?.bitrate ?? 0,
             width: first ? (sideways ? first.height : first.width) : 0,
             height: first ? (sideways ? first.width : first.height) : 0,
             hasAudio: Boolean(audio),
             hasVideo: Boolean(first),
           };
           if (kind === 'video' && !frames) throw new Error(`${file.name} can't be decoded here`);
-          entries.set(id, { info, file, frames, still, audio });
+          entries.set(id, {
+            info,
+            file,
+            frames,
+            readers: frames ? [reader(frames)] : [],
+            still,
+            audio,
+          });
           return info;
         }),
       );
@@ -121,7 +161,7 @@ const api = {
 
   setCanvas(offscreen: OffscreenCanvas): void {
     canvas = offscreen;
-    compositor = new Compositor(offscreen.getContext('2d', { alpha: false })!, fonts);
+    compositor = new Compositor(back.getContext('2d', { alpha: false })!, fonts);
   },
 
   async loadFont(family: string, bytes: ArrayBuffer): Promise<void> {
@@ -139,6 +179,13 @@ const api = {
   },
 
   // A full-resolution frame, drawn exactly as the export draws it.
+  // Source time where the frame shown at `time` begins, or null when the asset has no video frames.
+  async frameStart(assetId: string, time: number): Promise<number | null> {
+    const entry = entries.get(assetId);
+    if (!entry?.frames) return null;
+    return entry.frames.startOf(time);
+  },
+
   async snapshot(project: VideoProject, time: number): Promise<Blob> {
     const full = new OffscreenCanvas(project.width, project.height);
     await new Compositor(full.getContext('2d', { alpha: false })!, fonts).draw(
@@ -185,7 +232,7 @@ const api = {
     jobId: string,
     project: VideoProject,
     preferred: 'mp4' | 'webm',
-  ): Promise<{ bytes: Uint8Array; notes: string[]; container: 'mp4' | 'webm' }> {
+  ): Promise<{ bytes: Uint8Array; notes: string[]; container: 'mp4' | 'webm' } | null> {
     try {
       const infos = new Map([...entries].map(([id, e]) => [id, e.info]));
       const cuts = copyableCuts(project, infos);
@@ -194,7 +241,7 @@ const api = {
       const result = await copyCuts(entry.file, cuts.ranges, preferred, (f) =>
         reportProgress(jobId, f),
       );
-      return Comlink.transfer(result, [result.bytes.buffer as ArrayBuffer]);
+      return result && Comlink.transfer(result, [result.bytes.buffer as ArrayBuffer]);
     } catch (error) {
       throw new Error(messageOf(error), { cause: error });
     }
@@ -205,13 +252,13 @@ const api = {
     project: VideoProject,
     settings: VideoExportSettings,
   ): Promise<{ bytes: Uint8Array; notes: string[] }> {
-    const exporting = new Map<string, VideoFrames>();
+    const exporting = new Map<string, Readers>();
     try {
-      const frames = lookup((entry) => exporting.get(entry.info.id) ?? null);
+      const frames = lookup((entry) => exporting.get(entry.info.id));
       for (const entry of entries.values()) {
         if (entry.info.kind === 'video') {
-          const reader = await VideoFrames.open(entry.file);
-          if (reader) exporting.set(entry.info.id, reader);
+          const opened = await VideoFrames.open(entry.file);
+          if (opened) exporting.set(entry.info.id, [reader(opened)]);
         }
       }
       const infos = new Map([...entries].map(([id, e]) => [id, e.info]));
@@ -225,16 +272,20 @@ const api = {
     } catch (error) {
       throw new Error(messageOf(error), { cause: error });
     } finally {
-      for (const reader of exporting.values()) reader.close();
+      for (const readers of exporting.values())
+        for (const r of readers) void r.frames.then((frames) => frames?.close());
     }
   },
 };
 
-async function durationOf(file: File): Promise<number> {
+async function probeVideo(file: File): Promise<{ duration: number; fps: number; bitrate: number }> {
   const { ALL_FORMATS, BlobSource, Input } = await import('mediabunny');
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
-    return await input.computeDuration();
+    const duration = await input.computeDuration();
+    const track = await input.getPrimaryVideoTrack();
+    const stats = track ? await track.computePacketStats() : null;
+    return { duration, fps: stats?.averagePacketRate ?? 0, bitrate: stats?.averageBitrate ?? 0 };
   } finally {
     input.dispose();
   }

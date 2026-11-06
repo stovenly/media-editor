@@ -9,6 +9,7 @@ import { avSettings, startJob, type Job, type Output } from './run';
 import { messageOf } from '../engine/errors';
 import { plainError } from './errors';
 import { wakeLock } from './wake-lock.svelte';
+import { downloadBlob } from '../io/download';
 
 export type JobState =
   | { status: 'idle' }
@@ -26,6 +27,7 @@ export type FileItem = {
   inspection?: Inspection;
   error?: string;
   target: string | null;
+  options: ConvertOptions;
   edit: ImageEdit | null;
   job: JobState;
   estimate: Estimate | null;
@@ -36,6 +38,8 @@ const ESTIMATE_DELAY_MS = 400;
 
 let nextId = 0;
 
+const AUTO_DOWNLOAD_KEY = 'auto-download';
+
 class Files {
   items = $state.raw<FileItem[]>([]);
   defaults = $state.raw<Record<MediaKind, string | null>>({
@@ -44,7 +48,10 @@ class Files {
     video: null,
     subtitle: null,
   });
+  // The settings a newly added file starts with: whatever was last chosen.
   options = $state.raw<ConvertOptions>(loadOptions());
+  selected = $state<string | null>(null);
+  autoDownload = $state(localStorage.getItem(AUTO_DOWNLOAD_KEY) !== '0');
 
   private jobs = new Map<string, Job>();
   private estimating = new Map<string, Job>();
@@ -57,11 +64,13 @@ class Files {
       file,
       status: 'inspecting',
       target: null,
+      options: this.options,
       edit: null,
       job: { status: 'idle' },
       estimate: null,
     }));
     this.items = [...this.items, ...added];
+    if (!this.selectedItem()) this.selected = added[0]!.id;
     for (const item of added) this.inspect(item);
     return added;
   }
@@ -69,7 +78,18 @@ class Files {
   remove(id: string): void {
     this.cancel(id);
     this.estimating.get(id)?.cancel();
+    const index = this.items.findIndex((item) => item.id === id);
     this.items = this.items.filter((item) => item.id !== id);
+    if (this.selected === id)
+      this.selected = (this.items[index] ?? this.items[index - 1] ?? null)?.id ?? null;
+  }
+
+  select(id: string): void {
+    this.selected = id;
+  }
+
+  selectedItem(): FileItem | null {
+    return this.items.find((item) => item.id === this.selected) ?? null;
   }
 
   clear(): void {
@@ -88,7 +108,7 @@ class Files {
   targetOf(item: FileItem): string | null {
     const kind = item.inspection?.sniffed.kind;
     if (!kind) return null;
-    const chosen = item.target ?? this.defaults[kind];
+    const chosen = item.target;
     return chosen && targetsFor(kind, factsOf(item.inspection)).some((t) => t.id === chosen)
       ? chosen
       : null;
@@ -96,16 +116,27 @@ class Files {
 
   keyOf(item: FileItem): string | null {
     const id = this.targetOf(item);
-    return id ? optionsKey(id, this.options, item.edit) : null;
+    return id ? optionsKey(id, item.options, item.edit) : null;
   }
 
-  setDefault(kind: MediaKind, targetId: string): void {
-    this.defaults = { ...this.defaults, [kind]: targetId };
+  // Later files of the same kind start with this choice too.
+  setTarget(id: string, targetId: string | null): void {
+    const kind = this.find(id)?.inspection?.sniffed.kind;
+    this.update(id, { target: targetId });
+    if (kind && targetId) this.defaults = { ...this.defaults, [kind]: targetId };
     this.scheduleEstimates();
   }
 
-  setTarget(id: string, targetId: string | null): void {
-    this.update(id, { target: targetId });
+  // Gives every file of the selected file's kind its format and options.
+  applyToKind(): void {
+    const source = this.selectedItem();
+    const kind = source?.inspection?.sniffed.kind;
+    if (!source || !kind) return;
+    this.items = this.items.map((item) =>
+      item.id !== source.id && item.inspection?.sniffed.kind === kind
+        ? { ...item, target: source.target, options: source.options }
+        : item,
+    );
     this.scheduleEstimates();
   }
 
@@ -126,8 +157,12 @@ class Files {
   }
 
   setOptions(patch: Partial<ConvertOptions>): void {
-    this.options = { ...this.options, ...patch };
-    saveOptions(this.options);
+    const item = this.selectedItem();
+    if (!item) return;
+    const options = { ...item.options, ...patch };
+    this.update(item.id, { options });
+    this.options = options;
+    saveOptions(options);
     this.scheduleEstimates();
   }
 
@@ -150,6 +185,15 @@ class Files {
     });
   }
 
+  setAutoDownload(on: boolean): void {
+    this.autoDownload = on;
+    localStorage.setItem(AUTO_DOWNLOAD_KEY, on ? '1' : '0');
+  }
+
+  private deliver(output: Output): void {
+    if (this.autoDownload) downloadBlob(output.blob, output.name);
+  }
+
   convertAll(): void {
     for (const item of this.pending()) this.convert(item.id);
   }
@@ -161,6 +205,7 @@ class Files {
     if (!item || !key || !targetId || !item.inspection) return;
     if (item.estimate?.key === key && item.estimate.output) {
       this.update(id, { job: { status: 'done', key, output: item.estimate.output } });
+      this.deliver(item.estimate.output);
       return;
     }
     this.update(id, { job: { status: 'waiting', key } });
@@ -169,7 +214,7 @@ class Files {
       inspection: item.inspection,
       edit: item.edit,
       targetId,
-      options: this.options,
+      options: item.options,
       threads: this.threadsPerJob(),
       onTask: (taskId) =>
         this.update(id, { job: { status: 'running', key, taskId, started: performance.now() } }),
@@ -177,7 +222,10 @@ class Files {
     this.jobs.set(id, job);
     wakeLock.hold(id);
     job.result.then(
-      (output) => this.finish(id, key, { status: 'done', key, output }),
+      (output) => {
+        this.finish(id, key, { status: 'done', key, output });
+        if (this.find(id)?.job.status === 'done') this.deliver(output);
+      },
       (error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError')
           this.finish(id, key, { status: 'idle' });
@@ -238,11 +286,17 @@ class Files {
     task.result.then(
       (inspection) => {
         const kind = inspection.sniffed.kind;
-        this.update(item.id, { inspection, status: kind ? 'ready' : 'unsupported' });
-        if (kind && !this.defaults[kind]) {
-          const first = suggestions(inspection.sniffed.format ?? '', kind, factsOf(inspection))[0];
-          if (first) this.defaults = { ...this.defaults, [kind]: first.id };
-        }
+        const first = kind
+          ? suggestions(inspection.sniffed.format ?? '', kind, factsOf(inspection))[0]
+          : undefined;
+        const fallback = kind ? this.defaults[kind] : null;
+        const usable =
+          kind && fallback && targetsFor(kind, factsOf(inspection)).some((t) => t.id === fallback);
+        this.update(item.id, {
+          inspection,
+          status: kind ? 'ready' : 'unsupported',
+          target: usable ? fallback : (first?.id ?? null),
+        });
         this.scheduleEstimates();
       },
       (error: unknown) => this.update(item.id, { status: 'error', error: plainError(error) }),
@@ -265,7 +319,7 @@ class Files {
       if (item.inspection.sniffed.kind === 'subtitle') continue;
       if (item.inspection.sniffed.kind !== 'image') {
         const probe = item.inspection.av;
-        const bytes = probe ? estimateBytes(probe, avSettings(targetId, this.options)) : null;
+        const bytes = probe ? estimateBytes(probe, avSettings(targetId, item.options)) : null;
         this.update(item.id, { estimate: bytes === null ? null : { key, bytes, exact: false } });
         continue;
       }
@@ -286,7 +340,7 @@ class Files {
       inspection: item.inspection!,
       edit: item.edit,
       targetId,
-      options: this.options,
+      options: item.options,
       threads: this.threadsPerJob(),
       onTask: () => {},
     });

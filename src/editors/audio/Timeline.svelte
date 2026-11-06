@@ -252,7 +252,7 @@
     style:height="{height}px"
     role="application"
     tabindex="0"
-    aria-label="Timeline. Click to move the playhead, drag across to select, drag a clip to move it, drag its edges to trim. Keys: [ and ] select clips, arrows move the playhead."
+    aria-label="Timeline. Click to move the playhead, drag across to select, drag a clip to move it, drag its edges to trim."
     onpointerdown={down}
     onpointermove={move}
     onpointerup={up}

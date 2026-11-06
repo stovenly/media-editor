@@ -53,7 +53,17 @@ const MAGICK_HINTS = new Set([
   ...RAW,
 ]);
 
-const LOSSY = new Set(['jpeg', 'webp', 'avif', 'jxl', 'webp-anim', 'jp2', 'heic']);
+const LOSSY = new Set([
+  'jpeg',
+  'webp',
+  'avif',
+  'jxl',
+  'webp-anim',
+  'jp2',
+  'heic',
+  'gif',
+  'gif-anim',
+]);
 
 export async function convertImage(
   input: ConvertInput,
@@ -430,9 +440,18 @@ async function encode(
         break;
       }
       case 'gif':
-      case 'gif-anim':
-        bytes = image.gifsaveBuffer({ keep, effort: 7, dither: 1 });
+      case 'gif-anim': {
+        // Lower quality lets pixels that barely change between frames be reused, then uses fewer colours.
+        const loss = (100 - Math.max(1, Math.min(100, quality))) / 100;
+        bytes = image.gifsaveBuffer({
+          keep,
+          effort: 7,
+          dither: 1,
+          interframe_maxerror: Math.round(loss * 32),
+          bitdepth: quality >= 60 ? 8 : quality >= 30 ? 7 : 6,
+        });
         break;
+      }
       case 'tiff':
         bytes = image.tiffsaveBuffer({ keep, compression: 'deflate', predictor: 'horizontal' });
         break;

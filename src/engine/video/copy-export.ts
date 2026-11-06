@@ -17,12 +17,16 @@ export type CopyResult = { bytes: Uint8Array; container: 'mp4' | 'webm'; notes: 
 
 type Range = { in: number; out: number };
 
+const EXACT = 0.1; // seconds a cut may move to reach a key frame before the edit needs re-encoding
+
+// Null when a cut would land more than EXACT away from where it was put, because the nearest key frame is
+// further; the caller re-encodes instead so the export matches the timeline.
 export async function copyCuts(
   file: File,
   ranges: readonly Range[],
   preferred: 'mp4' | 'webm',
   onProgress: (fraction: number) => void,
-): Promise<CopyResult> {
+): Promise<CopyResult | null> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
     const video = await input.getPrimaryVideoTrack();
@@ -48,6 +52,22 @@ export async function copyCuts(
         : null;
     if (!container) throw new Error("This video's codecs can't be copied into MP4 or WebM");
 
+    const videoSink = new EncodedPacketSink(video);
+    const duration = await video.computeDuration();
+    for (const range of ranges) {
+      const start =
+        (await videoSink.getKeyPacket(range.in)) ?? (await videoSink.getFirstKeyPacket());
+      if (!start || range.in - start.timestamp > EXACT) return null;
+      if (range.out < duration - EXACT) {
+        const atOut = await videoSink.getKeyPacket(range.out);
+        const after =
+          atOut && atOut.timestamp >= range.out - 1e-6
+            ? atOut
+            : atOut && (await videoSink.getNextKeyPacket(atOut));
+        if (!after || after.timestamp - range.out > EXACT) return null;
+      }
+    }
+
     const target = new BufferTarget();
     const output = new Output({ format: formats[container], target });
     const videoOut = new EncodedVideoPacketSource(videoCodec);
@@ -56,7 +76,6 @@ export async function copyCuts(
     if (audioOut) output.addAudioTrack(audioOut);
     await output.start();
 
-    const videoSink = new EncodedPacketSink(video);
     const audioSink = audio ? new EncodedPacketSink(audio) : null;
     const videoConfig = (await video.getDecoderConfig()) ?? undefined;
     const audioConfig = audio ? ((await audio.getDecoderConfig()) ?? undefined) : undefined;

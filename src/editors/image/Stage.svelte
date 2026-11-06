@@ -153,21 +153,21 @@
       <button
         type="button"
         class="icon-button size-7"
-        aria-label="Zoom out (-)"
+        aria-label="Zoom out"
         onclick={() => zoomBy(-1)}><Minus size={14} /></button
       >
       <button
         type="button"
         class="min-w-20 rounded-full px-2 py-1 tabular-nums hover:bg-sunken"
-        aria-label={zoom === null ? 'Show at 100% (0)' : 'Fit to the window (0)'}
-        title={zoom === null ? 'Show at 100% (0)' : 'Fit to the window (0)'}
+        aria-label={zoom === null ? 'Show at 100%' : 'Fit to the window'}
+        title={zoom === null ? 'Show at 100%' : 'Fit to the window'}
         onclick={() => (zoom = zoom === null ? 1 : null)}
         >{zoom === null ? 'Fit · ' : ''}{Math.round(effective * 100)}%</button
       >
       <button
         type="button"
         class="icon-button size-7"
-        aria-label="Zoom in (+)"
+        aria-label="Zoom in"
         onclick={() => zoomBy(1)}><Plus size={14} /></button
       >
     </div>

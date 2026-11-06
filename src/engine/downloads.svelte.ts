@@ -15,11 +15,21 @@ export const ENGINE_LABELS: Record<EngineName, string> = {
 const base = import.meta.env.BASE_URL;
 let manifest: Promise<Manifest> | undefined;
 
+export class HostUnreachable extends Error {}
+
+// The service worker answers with this header when the host is down and the file isn't cached.
+function checkReachable(response: Response, what: string): void {
+  if (response.headers.has('X-Host-Unreachable'))
+    throw new HostUnreachable(`The server couldn't be reached to download the ${what}`);
+}
+
 export function engineManifest(): Promise<Manifest> {
   manifest ??= fetch(`${base}wasm/manifest.json`).then((response) => {
+    checkReachable(response, 'engine list');
     if (!response.ok) throw new Error('The engine list could not be loaded');
     return response.json() as Promise<Manifest>;
   });
+  manifest.catch(() => (manifest = undefined));
   return manifest;
 }
 
@@ -59,6 +69,7 @@ class Downloads {
       await Promise.all(
         files.map(async ([file]) => {
           const response = await fetch(engineUrl(entry.dir, file));
+          checkReachable(response, ENGINE_LABELS[engine]);
           if (!response.ok || !response.body)
             throw new Error(`Couldn't download the ${ENGINE_LABELS[engine]}`);
           const reader = response.body.getReader();

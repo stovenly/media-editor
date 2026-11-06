@@ -13,7 +13,6 @@ import {
   type ProjectAsset,
   type SavedProject,
 } from './file';
-import { normalizeVideoProject } from './video';
 
 export type Pending = {
   name: string;
@@ -164,7 +163,7 @@ class Projects {
       editing.open(first, {
         kind: 'video',
         items: ready,
-        project: normalizeVideoProject(remapAssets(saved.project, pending.matched)),
+        project: remapAssets(saved.project, pending.matched),
         fonts: pending.fonts,
       });
     }

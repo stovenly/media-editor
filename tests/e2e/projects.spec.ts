@@ -61,11 +61,11 @@ async function buildVideoProject(page: Page) {
   );
 }
 
-// Clicks the text clip on the timeline's Text row (ruler 22 px, rows 44 px, labels 64 px).
+// Clicks the text clip, which sits on the top layer (ruler 22 px, rows 44 px, labels 100 px).
 async function selectText(page: Page) {
   await timeline(page)
     .locator('canvas')
-    .click({ position: { x: 100, y: 22 + 44 * 2 + 20 } });
+    .click({ position: { x: 140, y: 22 + 20 } });
   await expect(page.getByRole('textbox', { name: 'Text', exact: true })).toHaveValue('Saved title');
 }
 

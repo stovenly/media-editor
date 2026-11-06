@@ -109,15 +109,22 @@ export function bitsPerPixel(quality: number): number {
   return 0.02 + q * q * 0.12;
 }
 
+// A re-encode of already-compressed frames needs more bits than the source spent to look the same.
+const REENCODE_HEADROOM = 1.25;
+
+// sourceBpp, in bits per pixel per frame, makes full quality at least as dense as the source.
 export function videoBitrate(
   width: number,
   height: number,
   fps: number,
   quality: number,
   codec = 'avc',
+  sourceBpp = 0,
 ): number {
   const efficiency = CODEC_EFFICIENCY[codec] ?? 1;
-  return Math.round(width * height * fps * bitsPerPixel(quality) * efficiency);
+  const bpp = bitsPerPixel(quality);
+  const matched = sourceBpp * REENCODE_HEADROOM * (bpp / bitsPerPixel(100));
+  return Math.round(width * height * fps * Math.max(bpp * efficiency, matched));
 }
 
 export function audioBitrate(quality: number, channels: number): number {
@@ -242,11 +249,13 @@ const FILE_IN = '/in';
 const FILE_OUT = '/out';
 
 // zip: a directory whose files are zipped as the output. raw: RGBA frames of this size, for gifski.
+// before: commands run first in the same instance, sharing its files.
 export type FfmpegJob = {
   args: string[];
   output: string;
   zip?: string;
   raw?: Dimensions & { fps: number };
+  before?: string[][];
 };
 
 function crf(quality: number, low: number, high: number): number {
@@ -255,6 +264,18 @@ function crf(quality: number, low: number, high: number): number {
 
 function dither(mode: AvSettings['gif']['dither']): string {
   return mode === 'none' ? 'none' : mode === 'bayer' ? 'bayer:bayer_scale=3' : 'floyd_steinberg';
+}
+
+// Width of an animated output: the chosen video size when there is one, otherwise the animation width.
+export function animationWidth(probe: AvProbe | undefined, settings: AvSettings): number {
+  const video = probe?.video;
+  if (!video) return settings.gif.width;
+  if (settings.height)
+    return Math.max(
+      2,
+      Math.round((video.width * Math.min(settings.height, video.height)) / video.height / 2) * 2,
+    );
+  return Math.min(settings.gif.width, video.width);
 }
 
 // FFmpeg command line for one job. The input is mounted read-only at /in/<name>.
@@ -273,6 +294,7 @@ export function ffmpegArgs(
     probe?.video?.codec === 'vp9' ? 'libvpx-vp9' : probe?.video?.codec === 'vp8' ? 'libvpx' : null;
   if (vpx && alpha) args.push('-c:v', vpx);
   args.push('-i', `${FILE_IN}/${inputName}`);
+  const afterInput = args.length;
   if (settings.trimEnd !== null && settings.trimEnd !== undefined)
     args.push('-t', String(Math.max(0, settings.trimEnd - (settings.trimStart ?? 0))));
   else if (settings.target === 'm4r') args.push('-t', String(RINGTONE_SECONDS));
@@ -309,10 +331,11 @@ export function ffmpegArgs(
 
   if (out.group === 'animated') {
     const gif = settings.gif;
-    const base = [`fps=${gif.fps}`, `scale='min(${gif.width},iw)':-2:flags=lanczos`];
+    const base = [`fps=${gif.fps}`, `scale=${animationWidth(probe, settings)}:-2:flags=lanczos`];
+    const unmapped = [...args, '-an'];
     args.push('-map', '0:v:0', '-an');
     if (settings.target === 'gif-anim' && gif.palette === 'gifski' && probe?.video) {
-      const width = Math.min(gif.width, probe.video.width);
+      const width = animationWidth(probe, settings);
       const size = even({ width, height: (probe.video.height * width) / probe.video.width });
       args.push(
         '-vf',
@@ -333,6 +356,40 @@ export function ffmpegArgs(
             ? 'stats_mode=single'
             : 'stats_mode=full';
       const use = `paletteuse=dither=${dither(gif.dither)}${gif.palette === 'diff' ? ':diff_mode=rectangle' : ''}${gif.palette === 'per-frame' ? ':new=1' : ''}`;
+      // A whole-clip palette needs every frame before the first is written, so it gets its own pass;
+      // that pass writes no timed output, and its progress comes from how much input has been read.
+      if (gif.palette !== 'per-frame') {
+        const palette = `${FILE_OUT}/palette.png`;
+        const scan = [
+          ...unmapped,
+          '-filter_complex',
+          `[0:v]${base.join(',')},split[a][b];[a]palettegen=${stats}:reserve_transparent=1[p]`,
+          '-map',
+          '[b]',
+          '-f',
+          'null',
+          '-',
+          '-map',
+          '[p]',
+          '-update',
+          '1',
+          palette,
+        ];
+        const encode = [
+          ...unmapped.slice(0, afterInput),
+          '-i',
+          palette,
+          ...unmapped.slice(afterInput),
+          '-filter_complex',
+          `[0:v]${base.join(',')}[x];[x][1:v]${use}[g]`,
+          '-map',
+          '[g]',
+          '-loop',
+          '0',
+          output,
+        ];
+        return { args: encode, output, before: [scan] };
+      }
       args.push(
         '-filter_complex',
         `[0:v]${base.join(',')},split[a][b];[a]palettegen=${stats}:reserve_transparent=1[p];[b][p]${use}`,

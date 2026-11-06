@@ -46,7 +46,10 @@ test('crops a clip to fill a different frame shape', async ({ page, browserName 
   };
   expect(topBrightness(await save(), 100)).toBeLessThan(2);
 
-  await page.keyboard.press(']');
+  const timeline = page.getByRole('application', { name: /Video timeline/ });
+  await timeline.scrollIntoViewIfNeeded();
+  const box = (await timeline.locator('canvas').boundingBox())!;
+  await page.mouse.click(box.x + 100 + 30, box.y + 44);
   await page.getByRole('button', { name: 'Fill the frame' }).click();
   await expect(page.getByText('75% × 100%')).toBeVisible();
   expect(topBrightness(await save(), 100)).toBeGreaterThan(20);

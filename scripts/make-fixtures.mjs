@@ -226,6 +226,16 @@ if (
   ])
 ) {
   ffmpeg('clip.webm', [...video, ...tone, '-c:v', 'libvpx-vp9', '-c:a', 'libopus', '-shortest']);
+  ffmpeg('long.mp4', [
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=320x240:rate=25:duration=8',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+  ]);
   ffmpeg('clip.mov', [
     ...video,
     ...tone,

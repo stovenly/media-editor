@@ -16,6 +16,13 @@
   --danger: light-dark(#dc2626, #f87171);
   --warning: light-dark(#b45309, #fbbf24);
   --success: light-dark(#15803d, #4ade80);
+  --font-ui: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+}
+
+/* OpenDyslexic draws about a fifth larger at the same size. */
+:root.dyslexic {
+  --font-ui: 'OpenDyslexic', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
 }
 
 :root[data-theme='light'] {
@@ -27,7 +34,7 @@
 }
 
 @theme inline {
-  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-ui);
   --color-surface: var(--surface);
   --color-raised: var(--surface-raised);
   --color-sunken: var(--surface-sunken);
@@ -46,6 +53,15 @@
 @layer base {
   html {
     @apply bg-surface text-fg font-sans antialiased;
+  }
+
+  button:enabled,
+  select:enabled,
+  summary,
+  [role='button'],
+  [role='tab'],
+  input:is([type='checkbox'], [type='radio'], [type='range'], [type='color']):enabled {
+    cursor: pointer;
   }
 
   :focus-visible {
@@ -107,4 +123,15 @@
 
 @utility indeterminate {
   animation: indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@utility pop-in {
+  animation: pop-in 0.16s ease-out;
 }

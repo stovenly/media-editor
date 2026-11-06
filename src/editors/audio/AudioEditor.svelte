@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import {
     Download,
     LoaderCircle,
@@ -7,7 +8,7 @@
     Plus,
     Redo2,
     Scissors,
-    SkipBack,
+    Square,
     Trash2,
     Undo2,
   } from '@lucide/svelte';
@@ -68,6 +69,13 @@
   let exportMb = $state<number | null>(null);
   let exporting = $state<{ jobId: string | null; stage: string } | null>(null);
   let exported = $state<{ blob: Blob; name: string; notes: string[] } | null>(null);
+  // Follows the converter's "download when done" setting; reading it untracked keeps a toggle from
+  // re-downloading the last export.
+  $effect(() => {
+    const done = exported;
+    if (done && untrack(() => files.autoDownload)) downloadBlob(done.blob, done.name);
+  });
+
   let exportError = $state<string | null>(null);
 
   const others = $derived(
@@ -137,10 +145,16 @@
   const edit = (label: string, fn: (p: AudioProject) => AudioProject) =>
     project && apply(label, fn(project));
 
-  function togglePlay() {
-    if (!project) return;
-    if (session.playing) session.stop();
-    else void session.play(project, session.position >= duration ? 0 : session.position);
+  const END_SLACK = 0.05; // seconds from the end that count as the end, so Play starts over
+
+  function play() {
+    if (project && !session.playing)
+      void session.play(project, session.position >= duration - END_SLACK ? 0 : session.position);
+  }
+
+  function stop() {
+    session.stop();
+    session.seek(0);
   }
 
   function seek(time: number) {
@@ -249,39 +263,14 @@
 
   function keydown(event: KeyboardEvent) {
     const mod = event.ctrlKey || event.metaKey;
-    if (mod && event.key.toLowerCase() === 's') {
-      event.preventDefault();
-      void projectMenu?.save(false);
-      return;
-    }
     if ((event.target as HTMLElement).closest('input, select, textarea')) return;
-    if (event.key === ' ') {
-      event.preventDefault();
-      togglePlay();
-    } else if (mod && event.key.toLowerCase() === 'z') {
+    if (mod && event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) history.redo();
       else history.undo();
     } else if (mod && event.key.toLowerCase() === 'y') {
       event.preventDefault();
       history.redo();
-    } else if ((event.key === '[' || event.key === ']') && project) {
-      const clips = project.tracks.flatMap((t) => t.clips).sort((a, b) => a.start - b.start);
-      const at = clips.findIndex((c) => c.id === selectedClip);
-      const next =
-        clips[
-          at < 0 ? (event.key === ']' ? 0 : clips.length - 1) : at + (event.key === ']' ? 1 : -1)
-        ];
-      if (next) {
-        selectedClip = next.id;
-        seek(next.start);
-      }
-    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-      event.preventDefault();
-      const step = (event.shiftKey ? 10 : 1) * (event.key === 'ArrowLeft' ? -1 : 1);
-      seek(Math.max(0, Math.min(duration, session.position + step)));
-    } else if (event.key.toLowerCase() === 's' && !mod) {
-      split();
     } else if (event.key === 'Delete' || event.key === 'Backspace') {
       deleteSelection();
     }
@@ -334,23 +323,23 @@
           {preparing}
         </p>
       {:else}
-        <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <div class="flex min-h-0 flex-1">
           <section class="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
             <div class="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                class="icon-button border border-line"
-                aria-label="Back to start"
-                onclick={() => seek(0)}><SkipBack size={16} /></button
-              >
-              <button
-                type="button"
-                class="grid size-10 place-items-center rounded-full bg-accent text-on-accent"
+                class="grid size-10 place-items-center rounded-full bg-accent text-on-accent transition-colors hover:bg-accent-hover"
                 aria-label={session.playing ? 'Pause' : 'Play'}
-                onclick={togglePlay}
+                onclick={() => (session.playing ? session.stop() : play())}
               >
                 {#if session.playing}<Pause size={18} />{:else}<Play size={18} />{/if}
               </button>
+              <button
+                type="button"
+                class="icon-button border border-line disabled:opacity-40"
+                aria-label="Stop"
+                onclick={stop}><Square size={14} /></button
+              >
               <span class="font-mono text-sm tabular-nums"
                 >{time(session.position)} / {time(duration)}</span
               >
@@ -358,13 +347,13 @@
               <span class="mx-2 h-6 w-px bg-line"></span>
               <button
                 type="button"
-                class="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-sm"
-                title="Split at the playhead (S)"
+                class="inline-flex items-center gap-1.5 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1.5 text-sm"
+                title="Split at the playhead"
                 onclick={split}><Scissors size={14} /> Split</button
               >
               <button
                 type="button"
-                class="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-sm disabled:opacity-40"
+                class="inline-flex items-center gap-1.5 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1.5 text-sm disabled:opacity-40"
                 disabled={!selection && !selectedClip}
                 title="Delete the selection (Delete)"
                 onclick={deleteSelection}><Trash2 size={14} /> Delete</button
@@ -372,7 +361,7 @@
               <label class="inline-flex items-center gap-1.5 text-sm">
                 <button
                   type="button"
-                  class="rounded-full border border-line px-3 py-1.5"
+                  class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1.5"
                   onclick={() =>
                     edit('Insert silence', (p) =>
                       insertSilence(p, session.position, silenceSeconds),
@@ -440,13 +429,13 @@
                     <span class="min-w-0 flex-1 truncate">{other.file.name}</span>
                     <button
                       type="button"
-                      class="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-xs"
+                      class="inline-flex items-center gap-1 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2.5 py-1 text-xs"
                       aria-label="Join {other.file.name} at the end"
                       onclick={() => add(other, 'append')}><Plus size={12} /> Join at end</button
                     >
                     <button
                       type="button"
-                      class="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-xs"
+                      class="inline-flex items-center gap-1 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2.5 py-1 text-xs"
                       aria-label="Add {other.file.name} on a new track at the playhead"
                       onclick={() => add(other, 'track')}
                       ><Plus size={12} /> New track at playhead</button
@@ -458,7 +447,7 @@
           </section>
 
           <aside
-            class="w-full shrink-0 space-y-5 overflow-y-auto border-t border-line bg-raised p-4 text-sm lg:w-80 lg:border-t-0 lg:border-l"
+            class="w-80 shrink-0 space-y-5 overflow-y-auto border-l border-line bg-raised p-4 text-sm"
           >
             {#if selected}
               <section class="space-y-2">
@@ -521,7 +510,7 @@
                 </label>
                 <button
                   type="button"
-                  class="rounded-full border border-line px-3 py-1 text-xs"
+                  class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1 text-xs"
                   onclick={() => apply('Crossfade', crossfade(project, selected.clip.id, 1))}
                   >Crossfade into the next clip (1 s)</button
                 >
@@ -716,6 +705,15 @@
                   onclick={runExport}>Export</button
                 >
               {/if}
+              {#if !exporting}<label class="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    class="accent-accent"
+                    checked={files.autoDownload}
+                    onchange={(e) => files.setAutoDownload(e.currentTarget.checked)}
+                  />
+                  Download when it's done
+                </label>{/if}
               {#if exportError}<p class="text-danger">{exportError}</p>{/if}
               {#if exported}
                 <div class="space-y-1 rounded-xl bg-sunken p-3">

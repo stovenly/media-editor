@@ -101,3 +101,32 @@ export const FORMATS: Record<string, FormatInfo> = {
 export function formatInfo(format: string): FormatInfo | undefined {
   return FORMATS[format];
 }
+
+// Format ids whose usual file extensions differ from the id.
+const EXTENSIONS: Record<string, string[]> = {
+  jpeg: ['jpg', 'jpeg', 'jfif'],
+  tiff: ['tif', 'tiff'],
+  pnm: ['pnm', 'ppm', 'pgm', 'pbm', 'pam'],
+  sun: ['ras'],
+  fits: ['fits', 'fit'],
+  heic: ['heic', 'heif'],
+  jp2: ['jp2', 'j2k', 'jpx'],
+  mts: ['mts', 'm2ts', 'ts'],
+  mpg: ['mpg', 'mpeg'],
+  aiff: ['aiff', 'aif'],
+  ogg: ['ogg', 'oga'],
+  ass: ['ass', 'ssa'],
+  apng: [],
+};
+
+export function extensionsOf(format: string): string[] {
+  return EXTENSIONS[format] ?? [format];
+}
+
+const MEDIA_EXTENSIONS = [
+  ...new Set(Object.keys(FORMATS).flatMap((id) => extensionsOf(id).map((ext) => `.${ext}`))),
+];
+
+// For file pickers: every media extension the converter reads, plus saved projects (.json and .zip).
+export const PICKER_ACCEPT = [...MEDIA_EXTENSIONS, '.json', '.zip'].join(',');
+export const MEDIA_ACCEPT = MEDIA_EXTENSIONS.join(',');

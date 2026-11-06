@@ -30,7 +30,6 @@
     type Rect,
     type Redaction,
   } from '../../project/image-edit';
-  import { isTyping } from '../../app/shortcuts.svelte';
   import { saveProject } from '../../project/save';
   import ProjectMenu from '../../project/ProjectMenu.svelte';
   import CropOverlay from './CropOverlay.svelte';
@@ -201,11 +200,7 @@
 
   function keydown(event: KeyboardEvent) {
     const mod = event.ctrlKey || event.metaKey;
-    if (mod && event.key.toLowerCase() === 's') {
-      event.preventDefault();
-      void projectMenu?.save(false);
-      return;
-    }
+    if ((event.target as HTMLElement).closest('input, select, textarea')) return;
     if (mod && event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) history.redo();
@@ -213,19 +208,6 @@
     } else if (mod && event.key.toLowerCase() === 'y') {
       event.preventDefault();
       history.redo();
-    } else if (isTyping(event.target) || mod || event.altKey) {
-      return;
-    } else if (event.key === '+' || event.key === '=') {
-      stage?.zoomBy(1);
-    } else if (event.key === '-') {
-      stage?.zoomBy(-1);
-    } else if (event.key === '0') {
-      zoom = zoom === null ? 1 : null;
-    } else if (event.key.toLowerCase() === 'r') {
-      rotateBy(event.shiftKey ? -90 : 90);
-    } else if (event.key.toLowerCase() === 'f') {
-      if (event.shiftKey) set('Flip', { flipV: !edit.flipV });
-      else set('Flip', { flipH: !edit.flipH });
     } else if (
       (event.key === 'Delete' || event.key === 'Backspace') &&
       selected &&
@@ -274,7 +256,7 @@
           type="button"
           class="rounded-full border px-3 py-1.5 text-sm {compare
             ? 'border-accent text-accent'
-            : 'border-line'}"
+            : 'border-line hover:border-accent hover:text-accent'}"
           aria-pressed={compare}
           onpointerdown={() => (compare = true)}
           onpointerup={() => (compare = false)}
@@ -301,8 +283,8 @@
         >
       </header>
 
-      <div class="flex min-h-0 flex-1 flex-col md:flex-row">
-        <div class="flex min-h-0 min-w-0 flex-1 p-4 md:p-6">
+      <div class="flex min-h-0 flex-1">
+        <div class="flex min-h-0 min-w-0 flex-1 p-6">
           {#if session.error}
             <p class="m-auto max-w-md text-center text-danger">{session.error}</p>
           {:else if !session.bitmap}
@@ -347,7 +329,7 @@
         </div>
 
         <aside
-          class="flex max-h-[45dvh] w-full shrink-0 flex-col border-t border-line bg-raised md:max-h-none md:w-80 md:border-t-0 md:border-l"
+          class="flex w-80 shrink-0 flex-col border-l border-line bg-raised"
         >
           <div class="flex border-b border-line" role="tablist">
             {#each TABS as t (t.id)}
@@ -376,7 +358,7 @@
                       type="button"
                       class="rounded-full border px-3 py-1 {aspectChoice === a.value
                         ? 'border-accent text-accent'
-                        : 'border-line'}"
+                        : 'border-line hover:border-accent hover:text-accent'}"
                       onclick={() => chooseAspect(a.value)}>{a.label}</button
                     >
                   {/each}
@@ -578,7 +560,7 @@
                   {#each [25, 50, 75, 100] as percent (percent)}
                     <button
                       type="button"
-                      class="rounded-full border border-line px-3 py-1 text-xs"
+                      class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1 text-xs"
                       onclick={() => setResize(Math.round((cropped.width * percent) / 100), null)}
                       >{percent}%</button
                     >

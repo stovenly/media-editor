@@ -25,7 +25,16 @@ test('edits an image and converts the edited result', async ({ page }) => {
   await page.getByRole('button', { name: /^Undo/ }).click();
   await page.getByRole('tab', { name: /Redact/ }).click();
   const stage = page.getByRole('application', { name: /draw an area/ });
-  const box = (await stage.boundingBox())!;
+  // Switching tabs re-renders the cropped image, so wait for the stage to stop resizing.
+  let box = (await stage.boundingBox())!;
+  await expect
+    .poll(async () => {
+      const next = (await stage.boundingBox())!;
+      const settled = next.width === box.width && next.height === box.height;
+      box = next;
+      return settled;
+    })
+    .toBe(true);
   await page.mouse.move(box.x + 5, box.y + 5);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
@@ -33,10 +42,7 @@ test('edits an image and converts the edited result', async ({ page }) => {
   await expect(page.getByText('1. Solid box')).toBeVisible();
   await page.getByRole('button', { name: 'Done' }).click();
 
-  await expect(page.getByRole('button', { name: 'Edit alpha.png' })).toHaveAttribute(
-    'title',
-    'Edited',
-  );
+  await expect(page.getByRole('button', { name: 'Edit alpha.png' })).toHaveText('Edited');
   await page.getByRole('radio', { name: 'WebP' }).click();
   await page.getByRole('button', { name: 'Convert', exact: true }).click();
   await expect(page.getByText(/Redacted, with all metadata/)).toBeVisible({ timeout: 60_000 });

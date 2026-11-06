@@ -71,6 +71,7 @@
   <TextStyleFields
     style={clip.style}
     {fonts}
+    placement={false}
     onChange={(label, style: TextStyle) => onChange(label, { style })}
     {onAddFont}
   />

@@ -3,6 +3,8 @@ import type { TextStyle } from '../../project/text';
 
 type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 
+const WRAP_WIDTH = 0.9; // fraction of the frame width
+
 export function fontString(style: TextStyle, px: number): string {
   return `${style.italic ? 'italic ' : ''}${style.bold ? 700 : 400} ${px}px "${style.font}", sans-serif`;
 }
@@ -26,7 +28,10 @@ export function wrapLines(ctx: Ctx, text: string, maxWidth: number): string[] {
   return lines;
 }
 
-// `width` and `height` are the frame in canvas pixels; `alpha` multiplies everything drawn.
+type Box = { x: number; y: number; width: number; height: number };
+
+// `width` and `height` are the frame in canvas pixels; `alpha` multiplies everything drawn. With `box`
+// (canvas pixels) the text wraps to it and is centred in it, ignoring the style's anchor and margin.
 export function drawText(
   ctx: Ctx,
   text: string,
@@ -34,6 +39,7 @@ export function drawText(
   width: number,
   height: number,
   alpha = 1,
+  box?: Box,
 ): void {
   if (!text.trim() || alpha <= 0) return;
   const px = Math.max(1, style.size * height);
@@ -42,16 +48,24 @@ export function drawText(
   ctx.globalAlpha = alpha;
   ctx.font = fontString(style, px);
   ctx.textBaseline = 'middle';
-  const lines = wrapLines(ctx, text, Math.max(px, width - 2 * margin));
+  // Wrapping depends only on the box or frame width, so moving text never re-wraps it.
+  const lines = wrapLines(ctx, text, Math.max(px, box ? box.width : width * WRAP_WIDTH));
   const lineHeight = px * 1.25;
   const blockHeight = lines.length * lineHeight;
 
-  const [vertical, horizontal] = place(style.anchor);
+  const [vertical, horizontal] = box ? (['middle', 'center'] as const) : place(style.anchor);
   const align = horizontal === 'left' ? 'left' : horizontal === 'right' ? 'right' : 'center';
   ctx.textAlign = align;
-  const x = align === 'left' ? margin : align === 'right' ? width - margin : width / 2;
-  const top =
-    vertical === 'top'
+  const x = box
+    ? box.x + box.width / 2
+    : align === 'left'
+      ? margin
+      : align === 'right'
+        ? width - margin
+        : width / 2;
+  const top = box
+    ? box.y + (box.height - blockHeight) / 2
+    : vertical === 'top'
       ? margin
       : vertical === 'bottom'
         ? height - margin - blockHeight

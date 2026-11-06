@@ -31,11 +31,18 @@ export class VideoFrames {
     return new VideoFrames(input, new VideoSampleSink(track));
   }
 
+  // The frame whose start is nearest `time`, so a cut a few milliseconds before a frame begins shows that
+  // frame rather than a sliver of the one before, the same way however the decoder got there.
   async at(time: number): Promise<Drawable | null> {
     const t = Math.max(0, time);
+    // Just under half a frame, so an exact tie keeps the earlier frame.
+    const half = (sample: VideoSample) => Math.max(1e-4, Math.min(0.05, sample.duration * 0.45));
     const current = this.current;
     const reusable =
-      current && t >= current.timestamp && t < current.timestamp + SEEK_WINDOW && this.iterator;
+      current &&
+      t >= current.timestamp - half(current) &&
+      t < current.timestamp + SEEK_WINDOW &&
+      this.iterator;
     if (!reusable) await this.seek(t);
     while (this.current) {
       if (!this.lookahead) {
@@ -43,7 +50,7 @@ export class VideoFrames {
         if (next.done) break;
         this.lookahead = next.value;
       }
-      if (this.lookahead.timestamp > t + 1e-4) break;
+      if (this.lookahead.timestamp > t + half(this.lookahead)) break;
       this.replace(this.lookahead);
       this.lookahead = null;
     }
@@ -55,6 +62,12 @@ export class VideoFrames {
       height: this.frame.displayHeight,
       rotation: this.current.rotation,
     };
+  }
+
+  // Source time where the frame shown at `time` begins.
+  async startOf(time: number): Promise<number | null> {
+    await this.at(time);
+    return this.current?.timestamp ?? null;
   }
 
   private async seek(t: number): Promise<void> {

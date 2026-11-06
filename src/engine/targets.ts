@@ -544,16 +544,26 @@ const BY_KIND: Record<MediaKind, readonly string[]> = {
   subtitle: ['srt', 'vtt', 'ass'],
 };
 
+const ANIMATED_SUGGESTIONS: Record<string, readonly string[]> = {
+  gif: ['gif-anim', 'webp-anim', 'mp4', 'png'],
+  webp: ['webp-anim', 'gif-anim', 'mp4', 'png'],
+  apng: ['apng', 'gif-anim', 'webp-anim', 'png'],
+};
+
 export function suggestions(format: string, kind: MediaKind, facts: Facts = {}): Target[] {
+  if (facts.animated && ANIMATED_SUGGESTIONS[format])
+    return ANIMATED_SUGGESTIONS[format].map(target);
   const ids = SUGGESTIONS[format] ?? (RAW.has(format) ? ['jpeg', 'tiff', 'png'] : BY_KIND[kind]);
   const list = ids.filter((id) => id !== format).map(target);
   return facts.motion ? [target('motion'), ...list.slice(0, 3)] : list;
 }
 
+// An animated input offers the animated GIF rather than the still one, which would keep only frame one.
 export function targetsFor(kind: MediaKind, facts: Facts = {}): Target[] {
   return TARGETS.filter(
     (t) =>
       t.from.includes(kind) &&
+      !(facts.animated && t.id === 'gif') &&
       (!t.requires || (kind === 'video' && t.requires === 'animated') || facts[t.requires]),
   );
 }

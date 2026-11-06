@@ -115,6 +115,10 @@ export class VideoSession {
     this.fontFiles.set(font.id, file);
   }
 
+  frameStart(assetId: string, time: number): Promise<number | null> {
+    return this.api.frameStart(assetId, time);
+  }
+
   snapshot(project: VideoProject, time: number): Promise<Blob> {
     return this.api.snapshot(project, time);
   }
@@ -140,10 +144,11 @@ export class VideoSession {
     }
   }
 
-  // Resolves once sound is playing; frames follow the audio clock until `stop`.
-  async play(project: VideoProject, from: number): Promise<void> {
+  // Resolves once sound is playing; frames follow the audio clock until `stop`. `heard` is the project
+  // whose sound plays, when that differs from the one whose pictures show.
+  async play(project: VideoProject, from: number, heard: VideoProject = project): Promise<void> {
     const duration = videoDuration(project);
-    const sound = soundOf(project, this.assets);
+    const sound = soundOf(heard, this.assets);
     const ring = await this.audio.play(sound, from, duration);
     this.api.play(project, from, ring, sound.sampleRate, PREVIEW_EDGE).catch((error: unknown) => {
       this.error = messageOf(error);
@@ -165,11 +170,19 @@ export class VideoSession {
   ): Promise<{ bytes: Uint8Array; notes: string[]; container: 'mp4' | 'webm' }> {
     const jobId = `video-export-${++exportCounter}`;
     onJob(jobId, copy ? 'Copying' : 'Exporting');
-    let result: { bytes: Uint8Array; notes: string[]; container: 'mp4' | 'webm' };
+    let result: { bytes: Uint8Array; notes: string[]; container: 'mp4' | 'webm' } | null = null;
     try {
-      result = copy
-        ? await this.api.exportCopy(jobId, project, settings.container)
-        : { ...(await this.api.export(jobId, project, settings)), container: settings.container };
+      if (copy) result = await this.api.exportCopy(jobId, project, settings.container);
+      if (!result) {
+        if (copy) onJob(jobId, 'Exporting');
+        const full = await this.api.export(jobId, project, settings);
+        result = { ...full, container: settings.container };
+        if (copy)
+          result.notes = [
+            'Re-encoded so the cuts land exactly where you put them, between key frames',
+            ...result.notes,
+          ];
+      }
     } finally {
       hub.forget(jobId);
     }

@@ -5,7 +5,7 @@
   import { inspectPool, scheduler } from '../engine';
   import { target } from '../engine/targets';
   import { changedKeys, describeChanges } from './describe';
-  import { files } from './files.svelte';
+  import { files, type FileItem } from './files.svelte';
   import type { ConvertOptions } from './options';
 
   type Key = keyof ConvertOptions;
@@ -75,12 +75,11 @@
     'prores',
   ]);
 
-  let open = $state(localStorage.getItem('options-open') === '1');
   let advancedOpen = $state(localStorage.getItem('advanced-open') === '1');
-  $effect(() => localStorage.setItem('options-open', open ? '1' : '0'));
   $effect(() => localStorage.setItem('advanced-open', advancedOpen ? '1' : '0'));
 
-  const o = $derived(files.options);
+  let { item }: { item: FileItem } = $props();
+  const o = $derived(item.options);
 
   const context = $derived.by(() => {
     const targets = new Set<string>();
@@ -89,9 +88,8 @@
     let hdr = false;
     let audio = false;
     let videoToAnimated = false;
-    for (const item of files.items) {
-      const id = files.targetOf(item);
-      if (!id) continue;
+    const id = files.targetOf(item);
+    if (id) {
       targets.add(id);
       if (item.inspection?.metadata?.hdr && id === 'jpeg') hdr = true;
       const kind = item.inspection?.sniffed.kind;
@@ -99,18 +97,20 @@
       if ((kind === 'audio' || kind === 'video') && group !== 'animated' && group !== 'image')
         audio = true;
       if (kind === 'video' && group === 'animated') videoToAnimated = true;
-      if (item.inspection?.sniffed.kind === 'video') video = true;
+      if (kind === 'video') video = true;
       if (item.inspection?.alpha && !target(id).alpha) imageAlpha = true;
     }
     const groups = new Set([...targets].map((id) => target(id).group));
     return {
       targets,
-      quality: [...targets].some((id) => LOSSY.has(id)),
-      imageSize: [...files.items].some(
-        (item) =>
-          item.inspection?.sniffed.kind === 'image' &&
-          (groups.has('image') || groups.has('animated')),
-      ),
+      // GIFs from images go through libvips, whose GIF writer has a lossy mode; FFmpeg's has none.
+      quality:
+        [...targets].some((id) => LOSSY.has(id)) ||
+        (item.inspection?.sniffed.kind === 'image' &&
+          (targets.has('gif') || targets.has('gif-anim'))),
+      imageSize:
+        item.inspection?.sniffed.kind === 'image' &&
+        (groups.has('image') || groups.has('animated')),
       videoSize: video && (groups.has('video') || groups.has('animated')),
       background:
         imageAlpha || [...targets].some((id) => !target(id).alpha && target(id).group === 'image'),
@@ -127,16 +127,6 @@
     };
   });
 
-  const mainKeys = $derived<Key[]>([
-    ...(context.quality ? (['quality'] as const) : []),
-    ...(context.imageSize ? (['maxEdge'] as const) : []),
-    ...(context.videoSize ? (['height'] as const) : []),
-    'targetMb',
-    ...(context.background ? (['background'] as const) : []),
-    ...(context.removeAudio ? (['removeAudio'] as const) : []),
-    ...(context.hdr ? (['keepHdr'] as const) : []),
-    ...(context.av ? (['trimStart', 'trimEnd'] as const) : []),
-  ]);
   const advancedKeys = $derived<Key[]>([
     'metadata',
     ...(context.videoOut ? (['videoCodec', 'fps'] as const) : []),
@@ -149,13 +139,13 @@
     ...(context.cursor ? (['hotspotX', 'hotspotY'] as const) : []),
     ...(context.favicon ? (['maskableBackground'] as const) : []),
   ]);
-  const summary = $derived(describeChanges(o, [...mainKeys, ...advancedKeys]));
   const advancedSummary = $derived(describeChanges(o, advancedKeys));
 
   const set = (patch: Partial<ConvertOptions>) => files.setOptions(patch);
   const numberOrNull = (value: string) => (value === '' ? null : Number(value));
 
   let customMb = $state('');
+  let customSize = $state({ maxEdge: false, height: false });
 </script>
 
 {#snippet field(label: string, keys: Key[], control: Snippet, hint?: string)}
@@ -180,46 +170,84 @@
 
 {#snippet quality()}
   <div class="flex items-center gap-3 text-xs text-muted">
-    <span class="w-16">Smaller file</span>
+    <span class="shrink-0">Smaller file</span>
     <input
       type="range"
       min="1"
       max="100"
       value={o.quality}
       aria-label="Quality"
-      class="flex-1 accent-accent"
+      class="w-0 min-w-0 flex-1 accent-accent"
       onchange={(e) => set({ quality: Number(e.currentTarget.value) })}
     />
-    <span class="w-16 text-right">Better quality</span>
+    <span class="shrink-0">Better quality</span>
+  </div>
+{/snippet}
+
+{#snippet sizeField(
+  label: string,
+  key: 'maxEdge' | 'height',
+  presets: readonly number[],
+  name: (n: number) => string,
+  unit: string,
+)}
+  {@const value = o[key]}
+  {@const custom = customSize[key] || (value !== null && !presets.includes(value))}
+  <div class="grid gap-2">
+    <select
+      class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+      aria-label={label}
+      value={custom ? 'custom' : (value ?? '')}
+      onchange={(e) => {
+        const picked = e.currentTarget.value;
+        customSize[key] = picked === 'custom';
+        if (picked !== 'custom') set({ [key]: numberOrNull(picked) });
+      }}
+    >
+      <option value="">Original size</option>
+      {#each presets as size (size)}
+        <option value={size}>{name(size)}</option>
+      {/each}
+      <option value="custom">Custom…</option>
+    </select>
+    {#if custom}
+      <label class="flex items-center gap-2 text-sm">
+        <input
+          type="number"
+          min="16"
+          step="1"
+          class="w-28 rounded-xl border border-line bg-surface px-3 py-1.5"
+          aria-label="{label} in pixels"
+          value={value ?? ''}
+          onchange={(e) => {
+            const n = Math.round(Number(e.currentTarget.value));
+            if (n >= 16) set({ [key]: n });
+          }}
+        />
+        {unit}
+      </label>
+    {/if}
   </div>
 {/snippet}
 
 {#snippet imageSize()}
-  <select
-    class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
-    aria-label="Image size"
-    value={o.maxEdge ?? ''}
-    onchange={(e) => set({ maxEdge: numberOrNull(e.currentTarget.value) })}
-  >
-    <option value="">Original size</option>
-    {#each IMAGE_SIZES as size (size)}
-      <option value={size}>At most {size} px</option>
-    {/each}
-  </select>
+  {@render sizeField(
+    'Image size',
+    'maxEdge',
+    IMAGE_SIZES,
+    (n) => `At most ${n} px`,
+    'px on the longest side',
+  )}
 {/snippet}
 
 {#snippet videoSize()}
-  <select
-    class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
-    aria-label="Video size"
-    value={o.height ?? ''}
-    onchange={(e) => set({ height: numberOrNull(e.currentTarget.value) })}
-  >
-    <option value="">Original size</option>
-    {#each VIDEO_HEIGHTS as h (h)}
-      <option value={h}>{h === 2160 ? '4K' : `${h}p`}</option>
-    {/each}
-  </select>
+  {@render sizeField(
+    'Video size',
+    'height',
+    VIDEO_HEIGHTS,
+    (h) => (h === 2160 ? '4K' : `${h}p`),
+    'px tall',
+  )}
 {/snippet}
 
 {#snippet fit()}
@@ -228,7 +256,7 @@
       type="button"
       class="rounded-full border px-3 py-1 text-sm {o.targetMb === null
         ? 'border-accent text-accent'
-        : 'border-line'}"
+        : 'border-line hover:border-accent hover:text-accent'}"
       onclick={() => set({ targetMb: null })}>Off</button
     >
     {#each QUICK_MB as mb (mb)}
@@ -236,7 +264,7 @@
         type="button"
         class="rounded-full border px-3 py-1 text-sm {o.targetMb === mb
           ? 'border-accent text-accent'
-          : 'border-line'}"
+          : 'border-line hover:border-accent hover:text-accent'}"
         onclick={() => set({ targetMb: mb })}>{mb} MB</button
       >
     {/each}
@@ -466,87 +494,79 @@
   </div>
 {/snippet}
 
-<Collapsible.Root bind:open class="rounded-2xl border border-line bg-raised shadow-xs">
-  <Collapsible.Trigger class="flex w-full items-center gap-2 px-4 py-3 text-left text-sm">
-    <ChevronRight size={16} class="text-muted transition-transform {open ? 'rotate-90' : ''}" />
-    <span class="font-medium">Options</span>
-    {#if !open && summary.length}
-      <span class="truncate text-muted">· {summary.join(' · ')}</span>
-    {/if}
-  </Collapsible.Trigger>
-  <Collapsible.Content class="grid gap-5 border-t border-line px-4 py-4 sm:grid-cols-2">
-    {#if context.quality}{@render field('Quality', ['quality'], quality)}{/if}
-    {#if context.imageSize}{@render field(
-        'Image size',
-        ['maxEdge'],
-        imageSize,
-        'Never enlarges.',
-      )}{/if}
-    {#if context.videoSize}{@render field('Video size', ['height'], videoSize)}{/if}
-    {@render field(
-      'Fit to file size',
-      ['targetMb'],
-      fit,
-      'The result is never larger than this without a warning.',
-    )}
-    {#if context.background}{@render field(
-        'Background for transparent areas',
-        ['background'],
-        background,
-      )}{/if}
-    {#if context.removeAudio}{@render field('Audio', ['removeAudio'], removeAudio)}{/if}
-    {#if context.hdr}{@render field('HDR', ['keepHdr'], keepHdr)}{/if}
-    {#if context.av}{@render field(
-        'Trim',
-        ['trimStart', 'trimEnd'],
-        trim,
-        'Leave empty to keep the whole clip.',
-      )}{/if}
+<section class="grid gap-5 p-5" aria-labelledby="options-heading">
+  <h2 id="options-heading" class="text-sm font-semibold">Options</h2>
+  {#if context.quality}{@render field('Quality', ['quality'], quality)}{/if}
+  {#if context.imageSize}{@render field(
+      'Image size',
+      ['maxEdge'],
+      imageSize,
+      'Never enlarges.',
+    )}{/if}
+  {#if context.videoSize}{@render field('Video size', ['height'], videoSize)}{/if}
+  {@render field(
+    'Fit to file size',
+    ['targetMb'],
+    fit,
+    'The result is never larger than this without a warning.',
+  )}
+  {#if context.background}{@render field(
+      'Background for transparent areas',
+      ['background'],
+      background,
+    )}{/if}
+  {#if context.removeAudio}{@render field('Audio', ['removeAudio'], removeAudio)}{/if}
+  {#if context.hdr}{@render field('HDR', ['keepHdr'], keepHdr)}{/if}
+  {#if context.av}{@render field(
+      'Trim',
+      ['trimStart', 'trimEnd'],
+      trim,
+      'Leave empty to keep the whole clip.',
+    )}{/if}
 
-    <Collapsible.Root bind:open={advancedOpen} class="sm:col-span-2">
-      <Collapsible.Trigger class="flex items-center gap-2 text-sm text-muted hover:text-fg">
-        <ChevronRight size={14} class="transition-transform {advancedOpen ? 'rotate-90' : ''}" />
-        Advanced
-        {#if !advancedOpen && advancedSummary.length}<span class="truncate"
-            >· {advancedSummary.join(' · ')}</span
-          >{/if}
-      </Collapsible.Trigger>
-      <Collapsible.Content class="mt-4 grid gap-5 sm:grid-cols-2">
-        {@render field('Metadata', ['metadata'], metadata)}
-        {#if context.lossless}{@render field('Compression', ['lossless'], lossless)}{/if}
-        {#if context.videoOut}
-          {@render field('Video codec', ['videoCodec'], codec)}
-          {@render field('Frame rate', ['fps'], fps)}
-        {/if}
-        {#if context.audio}
-          {@render field('Audio bitrate', ['audioKbps'], audioKbps)}
-          {@render field('Sample rate', ['sampleRate'], sampleRate)}
-          {@render field('Channels', ['channels'], channels)}
-        {/if}
-        {#if context.videoToAnimated}
-          {@render field('Animation frame rate', ['gifFps'], gifFps)}
-          {@render field('Animation width', ['gifWidth'], gifWidth)}
-          {@render field('Dithering', ['gifDither'], gifDither)}
-          {@render field('Palette', ['gifPalette'], gifPalette)}
-        {/if}
-        {#if context.gif}{@render field(
-            'GIF transparency cut-off',
-            ['gifThreshold'],
-            gifThreshold,
-            'Pixels more transparent than this become fully transparent.',
-          )}{/if}
-        {#if context.cursor}{@render field(
-            'Cursor hotspot (32 px)',
-            ['hotspotX', 'hotspotY'],
-            hotspot,
-          )}{/if}
-        {#if context.favicon}{@render field(
-            'App icon background',
-            ['maskableBackground'],
-            maskable,
-            'Used for the Apple touch icon and the maskable icon.',
-          )}{/if}
-      </Collapsible.Content>
-    </Collapsible.Root>
-  </Collapsible.Content>
-</Collapsible.Root>
+  <Collapsible.Root bind:open={advancedOpen}>
+    <Collapsible.Trigger class="flex items-center gap-2 text-sm text-muted hover:text-fg">
+      <ChevronRight size={14} class="transition-transform {advancedOpen ? 'rotate-90' : ''}" />
+      Advanced
+      {#if !advancedOpen && advancedSummary.length}<span class="truncate"
+          >· {advancedSummary.join(' · ')}</span
+        >{/if}
+    </Collapsible.Trigger>
+    <Collapsible.Content class="mt-4 grid gap-5">
+      {@render field('Metadata', ['metadata'], metadata)}
+      {#if context.lossless}{@render field('Compression', ['lossless'], lossless)}{/if}
+      {#if context.videoOut}
+        {@render field('Video codec', ['videoCodec'], codec)}
+        {@render field('Frame rate', ['fps'], fps)}
+      {/if}
+      {#if context.audio}
+        {@render field('Audio bitrate', ['audioKbps'], audioKbps)}
+        {@render field('Sample rate', ['sampleRate'], sampleRate)}
+        {@render field('Channels', ['channels'], channels)}
+      {/if}
+      {#if context.videoToAnimated}
+        {@render field('Animation frame rate', ['gifFps'], gifFps)}
+        {@render field('Animation width', ['gifWidth'], gifWidth)}
+        {@render field('Dithering', ['gifDither'], gifDither)}
+        {@render field('Palette', ['gifPalette'], gifPalette)}
+      {/if}
+      {#if context.gif}{@render field(
+          'GIF transparency cut-off',
+          ['gifThreshold'],
+          gifThreshold,
+          'Pixels more transparent than this become fully transparent.',
+        )}{/if}
+      {#if context.cursor}{@render field(
+          'Cursor hotspot (32 px)',
+          ['hotspotX', 'hotspotY'],
+          hotspot,
+        )}{/if}
+      {#if context.favicon}{@render field(
+          'App icon background',
+          ['maskableBackground'],
+          maskable,
+          'Used for the Apple touch icon and the maskable icon.',
+        )}{/if}
+    </Collapsible.Content>
+  </Collapsible.Root>
+</section>

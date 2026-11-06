@@ -7,10 +7,16 @@ import {
   CanvasSource,
   Mp4OutputFormat,
   Output,
+  Quality,
   WebMOutputFormat,
 } from 'mediabunny';
 import { soundOf } from '../../project/video-audio';
-import { videoDuration, type VideoAsset, type VideoProject } from '../../project/video';
+import {
+  sourceBitsPerPixel,
+  videoDuration,
+  type VideoAsset,
+  type VideoProject,
+} from '../../project/video';
 import { framesOf } from '../audio/dsp';
 import { renderMix } from '../audio/render';
 import type { AssetHandle } from '../audio/source';
@@ -64,7 +70,14 @@ export async function exportVideo(
     );
 
   const audioBits = hasSound ? AUDIO_BITRATE : 0;
-  let bitrate = videoBitrate(width, height, fps, settings.quality, codec);
+  let bitrate = videoBitrate(
+    width,
+    height,
+    fps,
+    settings.quality,
+    codec,
+    sourceBitsPerPixel(project, assets),
+  );
   if (settings.targetBytes) {
     bitrate = Math.max(
       100_000,
@@ -83,7 +96,12 @@ export async function exportVideo(
         : new WebMOutputFormat(),
     target,
   });
-  const video = new CanvasSource(canvas, { codec, bitrate, keyFrameInterval: 2 });
+  // Variable bitrate lets browser encoders undershoot the target by half on calm footage.
+  const constant = new Quality({ bitrate, bitrateMode: 'constant' });
+  const quality = (await canEncodeVideo(codec, { width, height, quality: constant }))
+    ? constant
+    : new Quality({ bitrate });
+  const video = new CanvasSource(canvas, { codec, quality, keyFrameInterval: 2 });
   output.addVideoTrack(video, { frameRate: fps });
   const audioSource = hasSound
     ? new AudioSampleSource({

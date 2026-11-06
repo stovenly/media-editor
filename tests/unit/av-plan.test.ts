@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  animationWidth,
   estimateBytes,
   ffmpegArgs,
   outputSize,
   planBitrates,
   routeAv,
+  videoBitrate,
   type AvSettings,
 } from '../../src/engine/av/plan';
 import type { AvProbe } from '../../src/media/probe';
@@ -101,6 +103,13 @@ describe('sizes and bitrates', () => {
     expect(trimmed / full).toBeCloseTo(0.5, 1);
     expect(ringtone / full).toBeCloseTo(40 / 60, 1);
   });
+
+  it('never re-encodes a dense source at full quality with fewer bits than it had', () => {
+    const pixelRate = 1920 * 1080 * 24;
+    const source = 15_700_000;
+    expect(videoBitrate(1920, 1080, 24, 100, 'avc', source / pixelRate)).toBeGreaterThan(source);
+    expect(videoBitrate(1920, 1080, 24, 50, 'avc', source / pixelRate)).toBeLessThan(source);
+  });
 });
 
 describe('ffmpegArgs', () => {
@@ -114,11 +123,22 @@ describe('ffmpegArgs', () => {
     expect(args).not.toContain('-map_metadata');
   });
 
-  it('builds a palette pipeline for GIFs', () => {
-    const { args, output } = ffmpegArgs('in.mp4', VIDEO, settings({ target: 'gif-anim' }));
-    const graph = args[args.indexOf('-filter_complex') + 1];
-    expect(graph).toContain('palettegen');
-    expect(graph).toContain('paletteuse=dither=floyd_steinberg');
+  it('sizes animated output by the chosen video size, else the animation width', () => {
+    expect(animationWidth(VIDEO, settings({ target: 'webp-anim', height: 720 }))).toBe(1280);
+    expect(animationWidth(VIDEO, settings({ target: 'webp-anim' }))).toBe(480);
+    const { args } = ffmpegArgs('in.mp4', VIDEO, settings({ target: 'webp-anim', height: 720 }));
+    expect(args[args.indexOf('-vf') + 1]).toContain('scale=1280:-2');
+  });
+
+  it('builds the GIF palette in its own pass, then uses it', () => {
+    const { args, before, output } = ffmpegArgs('in.mp4', VIDEO, settings({ target: 'gif-anim' }));
+    const scan = before![0]!;
+    expect(scan[scan.indexOf('-filter_complex') + 1]).toContain('palettegen');
+    expect(scan).toContain('/out/palette.png');
+    expect(args[args.indexOf('-filter_complex') + 1]).toContain(
+      'paletteuse=dither=floyd_steinberg',
+    );
+    expect(args).toContain('/out/palette.png');
     expect(output.endsWith('.gif')).toBe(true);
   });
 

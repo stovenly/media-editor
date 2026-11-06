@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import {
     Camera,
     Captions as CaptionsIcon,
@@ -14,6 +15,7 @@
     Music,
     Pause,
     Play,
+    Square,
     Plus,
     Redo2,
     RotateCcw,
@@ -21,6 +23,7 @@
     Scissors,
     SquareDashed,
     Trash2,
+    Copy,
     Type,
     Undo2,
   } from '@lucide/svelte';
@@ -32,7 +35,6 @@
   import { messageOf } from '../../engine/errors';
   import { videoBitrate } from '../../engine/av/plan';
   import { downloadBlob } from '../../io/download';
-  import { newId } from '../../project/audio';
   import { History } from '../../project/history.svelte';
   import type { Rect } from '../../project/image-edit';
   import {
@@ -41,18 +43,27 @@
     addText,
     appendMain,
     ASPECTS,
+    addRedaction as placeRedaction,
     copyableCuts,
-    layout,
-    mainAt,
-    moveMain,
+    hearOnlyLane,
+    laneCount,
+    seeOnlyLane,
+    duplicateItem,
+    fromFirstItem,
+    laneItems,
+    moveItem,
+    moveToLane,
     newVideoProject,
+    sourceBitsPerPixel,
     removeAny,
-    splitMain,
+    resizeItem,
+    splitAt,
+    splitTarget,
     updateCaptions,
-    updateCue,
     updateMain,
     updateMusic,
     updateOverlay,
+    updateRedaction,
     updateText,
     videoDuration,
     type MainClip,
@@ -69,7 +80,10 @@
   import CaptionsPanel from './CaptionsPanel.svelte';
   import { VideoSession } from './session.svelte';
   import TextPanel from './TextPanel.svelte';
-  import VideoTimeline, { type MovableRow } from './VideoTimeline.svelte';
+  import TransformBox from './TransformBox.svelte';
+  import ChromaKeyFields from './ChromaKeyFields.svelte';
+  import { MEDIA_ACCEPT } from '../../io/formats';
+  import VideoTimeline from './VideoTimeline.svelte';
 
   let { item, restore, onClose }: { item: FileItem; restore?: Restore; onClose: () => void } =
     $props();
@@ -87,16 +101,44 @@
   let drawingRedaction = $state(false);
 
   let exportFormat = $state<'mp4' | 'webm'>('mp4');
-  let exportQuality = $state(82);
+  let exportQuality = $state(100);
   let exportMb = $state<number | null>(null);
   let exporting = $state<{ jobId: string; stage: string } | null>(null);
   let preferCopy = $state(true);
-  const copyable = $derived(project ? copyableCuts(project, session.assets) !== null : false);
+  const copyable = $derived(
+    project ? copyableCuts(fromFirstItem(project), session.assets) !== null : false,
+  );
   const fastCopy = $derived(copyable && preferCopy);
   let captionsPanel = $state<ReturnType<typeof CaptionsPanel>>();
   let exportError = $state<string | null>(null);
   let exported = $state<{ blob: Blob; name: string; notes: string[] } | null>(null);
+  // Follows the converter's "download when done" setting; reading it untracked keeps a toggle from
+  // re-downloading the last export.
+  $effect(() => {
+    const done = exported;
+    if (done && untrack(() => files.autoDownload)) downloadBlob(done.blob, done.name);
+  });
 
+  let mediaPicker = $state<HTMLInputElement>();
+  // Preview only: the one layer seen or heard, or null for all of them.
+  let soloView = $state<number | null>(null);
+  let soloHear = $state<number | null>(null);
+  const seen = $derived(
+    project && soloView !== null && soloView < laneCount(project)
+      ? seeOnlyLane(project, soloView)
+      : project,
+  );
+  const heard = $derived(
+    project && soloHear !== null && soloHear < laneCount(project)
+      ? hearOnlyLane(project, soloHear)
+      : project,
+  );
+  // Playback holds the project it started with, so a new solo stops it.
+  $effect(() => {
+    void soloView;
+    void soloHear;
+    untrack(() => playing && halt());
+  });
   const bin = $derived(
     files.items.filter(
       (i) =>
@@ -114,46 +156,24 @@
   const selectedRedaction = $derived(project?.redactions.find((r) => r.id === selected) ?? null);
   const selectedText = $derived(project?.texts.find((t) => t.id === selected) ?? null);
 
-  // Everything on the timeline in time order, for keyboard selection and announcements.
+  // Everything on the timeline, for announcements.
   const items = $derived.by(() => {
     if (!project) return [];
     const name = (id: string) => session.assets.get(id)?.name ?? '';
+    const labels = new Map<string, string>([
+      ...project.main.map((c) => [c.id, `Clip ${name(c.assetId)}`] as const),
+      ...project.overlay.map((o) => [o.id, `Overlay ${name(o.assetId)}`] as const),
+      ...project.texts.map((t) => [t.id, `Text ${t.text}`] as const),
+      ...project.music.map((m) => [m.id, `Music ${name(m.assetId)}`] as const),
+      ...project.redactions.map((r) => [r.id, 'Covered area'] as const),
+    ]);
     return [
-      ...layout(project).map((p) => ({
-        id: p.clip.id,
-        start: p.start,
-        end: p.end,
-        label: `Clip ${name(p.clip.assetId)}`,
-      })),
-      ...project.overlay.map((o) => ({
-        id: o.id,
-        start: o.start,
-        end: o.start + o.out - o.in,
-        label: `Overlay ${name(o.assetId)}`,
-      })),
-      ...project.texts.map((t) => ({
-        id: t.id,
-        start: t.start,
-        end: t.start + t.duration,
-        label: `Text ${t.text}`,
-      })),
+      ...laneItems(project).map((i) => ({ ...i, label: labels.get(i.id) ?? '' })),
       ...project.captions.cues.map((c) => ({
         id: c.id,
         start: c.start,
         end: c.end,
         label: `Caption ${c.text}`,
-      })),
-      ...project.music.map((m) => ({
-        id: m.id,
-        start: m.start,
-        end: m.start + m.out - m.in,
-        label: `Music ${name(m.assetId)}`,
-      })),
-      ...project.redactions.map((r) => ({
-        id: r.id,
-        start: r.from,
-        end: r.to,
-        label: 'Covered area',
       })),
     ].sort((a, b) => a.start - b.start);
   });
@@ -206,7 +226,7 @@
 
   $effect(() => {
     if (cropView) session.render(cropView.project, cropView.time);
-    else if (project && !playing) session.render(project, position);
+    else if (seen && !playing) session.render(seen, position);
   });
 
   // Playback position comes from the audio clock.
@@ -228,23 +248,95 @@
     else apply('Add music', addMusic(current, asset, position));
   }
 
-  async function togglePlay() {
-    if (!project) return;
+  let reversing = $state(false);
+  let reverseFrame = 0;
+  $effect(() => () => cancelAnimationFrame(reverseFrame));
+
+  function halt() {
     if (playing) {
       session.stop();
       playing = false;
-      return;
     }
-    const from = position >= duration ? 0 : position;
-    await session.play(project, from);
+    cancelAnimationFrame(reverseFrame);
+    reversing = false;
+  }
+
+  async function play() {
+    if (!project || playing) return;
+    halt();
+    // Within a frame of the end counts as the end, so Play starts over.
+    await session.play(seen!, position >= duration - 1 / project.fps ? 0 : position, heard!);
     playing = true;
   }
 
-  function seek(time: number) {
-    if (playing) {
-      session.stop();
-      playing = false;
+  // Walks the playhead back in real time without sound; each position renders like a seek.
+  function playBackwards() {
+    if (!project || reversing) return;
+    halt();
+    if (position <= 0) position = duration;
+    reversing = true;
+    let last = performance.now();
+    const tick = (now: number) => {
+      position = Math.max(0, position - (now - last) / 1000);
+      last = now;
+      if (position > 0) reverseFrame = requestAnimationFrame(tick);
+      else reversing = false;
+    };
+    reverseFrame = requestAnimationFrame(tick);
+  }
+
+  // Shows the frame at the dragged edge: the first frame kept, or the last one.
+  function trim(id: string, edge: 'start' | 'end', time: number) {
+    if (!project) return;
+    const next = resizeItem(project, session.assets, id, edge, time);
+    apply('Change length', next);
+    const item =
+      laneItems(next).find((i) => i.id === id) ?? next.captions.cues.find((c) => c.id === id);
+    if (!item) return;
+    halt();
+    position = edge === 'start' ? item.start : Math.max(item.start, item.end - 1 / next.fps);
+  }
+
+  const duplicable = $derived(
+    !!project && !!selected && laneItems(project).some((i) => i.id === selected),
+  );
+
+  function duplicate() {
+    if (!project || !selected) return;
+    const copied = duplicateItem(project, selected);
+    if (!copied) return;
+    apply('Duplicate', copied.project);
+    selected = copied.id;
+  }
+
+  // Cuts where the source frame on screen begins, so that frame starts the second part; a time between
+  // frames would leave a sliver of the frame before.
+  async function split() {
+    if (!project) return;
+    const at = position;
+    const item = splitTarget(project, at, selected);
+    if (!item) return;
+    let time = at;
+    const clip =
+      project.main.find((c) => c.id === item.id) ?? project.overlay.find((o) => o.id === item.id);
+    if (clip) {
+      const speed = 'speed' in clip ? clip.speed : 1;
+      const source = await session.frameStart(clip.assetId, clip.in + (at - item.start) * speed);
+      if (source !== null && source > clip.in && source < clip.out)
+        time = item.start + (source - clip.in) / speed;
     }
+    // Applied to the timeline as it is now, which another split may have changed while this one waited.
+    const latest = history.state;
+    if (latest) apply('Split', splitAt(latest, time, item.id));
+  }
+
+  function stop() {
+    halt();
+    position = 0;
+  }
+
+  function seek(time: number) {
+    halt();
     position = Math.max(0, Math.min(time, duration));
   }
 
@@ -286,18 +378,6 @@
     selected = next.texts.at(-1)!.id;
   }
 
-  function move(row: MovableRow, id: string, start: number) {
-    if (!project) return;
-    if (row === 'overlay') apply('Move overlay', updateOverlay(project, id, { start }));
-    else if (row === 'music') apply('Move music', updateMusic(project, id, { start }));
-    else if (row === 'text') apply('Move text', updateText(project, id, { start }));
-    else {
-      const cue = project.captions.cues.find((c) => c.id === id);
-      if (cue)
-        apply('Move caption', updateCue(project, id, { start, end: start + cue.end - cue.start }));
-    }
-  }
-
   async function addFont(file: File): Promise<string | null> {
     if (!history.state) return null;
     const font = await session.addFont(
@@ -317,15 +397,17 @@
     const asset = clip && session.assets.get(clip.assetId);
     if (!clip || !asset) return null;
     const { width, height } = orientedSize(clip, asset);
-    const at = mainAt(project, position).find((m) => m.clip.id === clip.id)?.source ?? clip.in;
+    const local = Math.max(0, Math.min(position - clip.start, (clip.out - clip.in) / clip.speed));
+    const at = Math.min(clip.out, clip.in + local * clip.speed);
     const single: MainClip = {
       ...clip,
+      start: 0,
+      lane: 0,
       in: at,
       out: at + 1,
       speed: 1,
       fadeIn: 0,
       fadeOut: 0,
-      transition: 0,
       transform: { ...clip.transform, crop: null },
     };
     return {
@@ -384,27 +466,20 @@
 
   function addRedaction(rect: Rect) {
     if (!project) return;
-    const redaction: TimedRedaction = {
-      id: newId('redact'),
+    const placed = placeRedaction(
+      project,
       rect,
-      from: position,
-      to: Math.min(duration, position + 3),
-      kind: 'fill',
-      color: '#000000',
-    };
-    apply('Redact', { ...project, redactions: [...project.redactions, redaction] });
-    selected = redaction.id;
+      position,
+      Math.max(position + 0.1, Math.min(duration, position + 3)),
+    );
+    apply('Redact', placed.project);
+    selected = placed.id;
     drawingRedaction = false;
   }
 
   function patchRedaction(patch: Partial<TimedRedaction>) {
-    if (!project || !selectedRedaction) return;
-    apply('Redaction', {
-      ...project,
-      redactions: project.redactions.map((r) =>
-        r.id === selectedRedaction.id ? { ...r, ...patch } : r,
-      ),
-    });
+    if (project && selectedRedaction)
+      apply('Redaction', updateRedaction(project, selectedRedaction.id, patch));
   }
 
   const estimate = $derived(
@@ -417,6 +492,7 @@
             project.fps,
             exportQuality,
             exportFormat === 'mp4' ? 'avc' : 'vp9',
+            sourceBitsPerPixel(project, session.assets),
           ) +
             160_000) *
             duration) /
@@ -426,14 +502,13 @@
 
   async function runExport() {
     if (!project) return;
-    session.stop();
-    playing = false;
+    halt();
     exportError = null;
     exported = null;
     wakeLock.hold('video-export');
     try {
       const result = await session.export(
-        project,
+        fromFirstItem(project),
         {
           container: exportFormat,
           quality: exportQuality,
@@ -461,44 +536,17 @@
 
   function keydown(event: KeyboardEvent) {
     const mod = event.ctrlKey || event.metaKey;
-    if (mod && event.key.toLowerCase() === 's') {
-      event.preventDefault();
-      void projectMenu?.save(false);
-      return;
-    }
     if ((event.target as HTMLElement).closest('input, select, textarea, [role=slider]')) return;
-    if (event.key === ' ') {
-      event.preventDefault();
-      void togglePlay();
-    } else if (mod && event.key.toLowerCase() === 'z') {
+    if (mod && event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) history.redo();
       else history.undo();
     } else if (mod && event.key.toLowerCase() === 'y') {
       event.preventDefault();
       history.redo();
-    } else if (event.key === '[' || event.key === ']') {
-      const forward = event.key === ']';
-      const at = items.findIndex((i) => i.id === selected);
-      const next = items[at < 0 ? (forward ? 0 : items.length - 1) : at + (forward ? 1 : -1)];
-      if (next) {
-        selected = next.id;
-        seek(next.start);
-      }
-    } else if (event.key.toLowerCase() === 't' && !mod && project) {
-      insertText();
-    } else if (event.key.toLowerCase() === 's' && !mod && project) {
-      apply('Split', splitMain(project, position));
     } else if ((event.key === 'Delete' || event.key === 'Backspace') && selected && project) {
       apply('Delete', removeAny(project, selected));
       selected = null;
-    } else if (event.key === 'Home' || event.key === 'End') {
-      event.preventDefault();
-      seek(event.key === 'Home' ? 0 : duration);
-    } else if (event.key === 'ArrowLeft') {
-      step(-1);
-    } else if (event.key === 'ArrowRight') {
-      step(1);
     }
   }
 
@@ -551,7 +599,7 @@
       {:else}
         <div class="flex min-h-0 flex-1">
           <aside
-            class="hidden w-60 shrink-0 space-y-2 overflow-y-auto border-r border-line bg-raised p-3 text-sm md:block"
+            class="w-60 shrink-0 space-y-2 overflow-y-auto border-r border-line bg-raised p-3 text-sm"
           >
             <h3 class="font-medium">Media</h3>
             {#each bin as source (source.id)}
@@ -562,13 +610,13 @@
                   {#if kind === 'image' || kind === 'video'}
                     <button
                       type="button"
-                      class="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs"
+                      class="inline-flex items-center gap-1 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2 py-0.5 text-xs"
                       aria-label="Add {source.file.name} to the video track"
                       onclick={() => addFromBin(source, 'main')}><Plus size={11} /> Video</button
                     >
                     <button
                       type="button"
-                      class="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs"
+                      class="inline-flex items-center gap-1 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2 py-0.5 text-xs"
                       aria-label="Add {source.file.name} as an overlay"
                       onclick={() => addFromBin(source, 'overlay')}
                       ><Layers size={11} /> Overlay</button
@@ -577,7 +625,7 @@
                   {#if kind === 'subtitle'}
                     <button
                       type="button"
-                      class="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs"
+                      class="inline-flex items-center gap-1 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2 py-0.5 text-xs"
                       aria-label="Add {source.file.name} as captions"
                       onclick={() => captionsPanel?.importFile(source.file)}
                       ><CaptionsIcon size={11} /> Captions</button
@@ -585,7 +633,7 @@
                   {:else if kind !== 'image'}
                     <button
                       type="button"
-                      class="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs"
+                      class="inline-flex items-center gap-1 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2 py-0.5 text-xs"
                       aria-label="Add {source.file.name} as music"
                       onclick={() => addFromBin(source, 'music')}><Music size={11} /> Music</button
                     >
@@ -593,11 +641,26 @@
                 </div>
               </div>
             {/each}
-            <p class="text-xs text-muted">Add more files to the converter to use them here.</p>
+            <input
+              bind:this={mediaPicker}
+              type="file"
+              multiple
+              accept={MEDIA_ACCEPT}
+              hidden
+              onchange={(e) => {
+                files.add([...(e.currentTarget.files ?? [])]);
+                e.currentTarget.value = '';
+              }}
+            />
+            <button
+              type="button"
+              class="inline-flex w-full items-center justify-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-sm transition-colors hover:border-accent hover:text-accent"
+              onclick={() => mediaPicker?.click()}><Plus size={14} /> Add files</button
+            >
           </aside>
 
           <section class="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-            <div class="relative mx-auto w-full max-w-4xl">
+            <div class="relative mx-auto w-full">
               <div
                 class="relative mx-auto bg-black"
                 style:aspect-ratio={cropView
@@ -605,7 +668,7 @@
                   : project
                     ? `${project.width} / ${project.height}`
                     : '16 / 9'}
-                style:max-height="55dvh"
+                style:max-height="max(28dvh, calc(100dvh - 470px))"
               >
                 <canvas
                   bind:this={canvas}
@@ -625,6 +688,42 @@
                     onDraw={addRedaction}
                     onSelect={() => {}}
                   />
+                {:else if project && selectedText}
+                  <TransformBox
+                    rect={selectedText.rect}
+                    label="Text box"
+                    onChange={(rect, action, factor) =>
+                      apply(
+                        `${action} text`,
+                        updateText(project, selectedText.id, {
+                          rect,
+                          style: {
+                            ...selectedText.style,
+                            size: Math.max(0.005, selectedText.style.size * factor),
+                          },
+                        }),
+                      )}
+                  />
+                {:else if project && selectedOverlay}
+                  <TransformBox
+                    rect={selectedOverlay.rect}
+                    label="Overlay"
+                    onChange={(rect, action) =>
+                      apply(
+                        `${action} overlay`,
+                        updateOverlay(project, selectedOverlay.id, { rect }),
+                      )}
+                  />
+                {:else if project && selectedRedaction}
+                  <TransformBox
+                    rect={selectedRedaction.rect}
+                    label="Covered area"
+                    onChange={(rect, action) =>
+                      apply(
+                        `${action} covered area`,
+                        updateRedaction(project, selectedRedaction.id, { rect }),
+                      )}
+                  />
                 {/if}
                 {#if !project}
                   <p
@@ -639,18 +738,32 @@
             <div class="flex flex-wrap items-center gap-2">
               <button
                 type="button"
+                class="icon-button border border-line disabled:opacity-40"
+                aria-label="Play backwards"
+                aria-pressed={reversing}
+                onclick={playBackwards}><Play size={15} class="rotate-180" /></button
+              >
+              <button
+                type="button"
+                class="grid size-10 place-items-center rounded-full bg-accent text-on-accent transition-colors hover:bg-accent-hover"
+                aria-label={playing || reversing ? 'Pause' : 'Play'}
+                onclick={() => (playing || reversing ? halt() : play())}
+              >
+                {#if playing || reversing}<Pause size={18} />{:else}<Play size={18} />{/if}
+              </button>
+              <button
+                type="button"
+                class="icon-button border border-line disabled:opacity-40"
+                aria-label="Stop"
+                onclick={stop}><Square size={14} /></button
+              >
+              <span class="mx-1 h-6 w-px bg-line"></span>
+              <button
+                type="button"
                 class="icon-button border border-line"
                 aria-label="Previous frame"
                 onclick={() => step(-1)}><ChevronLeft size={16} /></button
               >
-              <button
-                type="button"
-                class="grid size-10 place-items-center rounded-full bg-accent text-on-accent"
-                aria-label={playing ? 'Pause' : 'Play'}
-                onclick={togglePlay}
-              >
-                {#if playing}<Pause size={18} />{:else}<Play size={18} />{/if}
-              </button>
               <button
                 type="button"
                 class="icon-button border border-line"
@@ -663,14 +776,13 @@
               <span class="mx-1 h-6 w-px bg-line"></span>
               <button
                 type="button"
-                class="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-sm"
-                title="Split at the playhead (S)"
-                onclick={() => project && apply('Split', splitMain(project, position))}
-                ><Scissors size={14} /> Split</button
+                class="inline-flex items-center gap-1.5 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1.5 text-sm"
+                title="Split at the playhead"
+                onclick={split}><Scissors size={14} /> Split</button
               >
               <button
                 type="button"
-                class="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-sm disabled:opacity-40"
+                class="inline-flex items-center gap-1.5 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1.5 text-sm disabled:opacity-40"
                 disabled={!selected}
                 onclick={() =>
                   project &&
@@ -680,22 +792,28 @@
               >
               <button
                 type="button"
-                class="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-sm"
-                title="Add text at the playhead (T)"
+                class="inline-flex items-center gap-1.5 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1.5 text-sm disabled:opacity-40"
+                disabled={!duplicable}
+                onclick={duplicate}><Copy size={14} /> Duplicate</button
+              >
+              <button
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1.5 text-sm"
+                title="Add text at the playhead"
                 onclick={insertText}><Type size={14} /> Text</button
               >
               <button
                 type="button"
                 class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm {drawingRedaction
                   ? 'border-accent text-accent'
-                  : 'border-line'}"
+                  : 'border-line hover:border-accent hover:text-accent'}"
                 aria-pressed={drawingRedaction}
                 onclick={() => (drawingRedaction = !drawingRedaction)}
                 ><SquareDashed size={14} /> Redact an area</button
               >
               <button
                 type="button"
-                class="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-sm"
+                class="inline-flex items-center gap-1.5 rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1.5 text-sm"
                 title="Save the frame at the playhead as a PNG"
                 onclick={saveFrame}><Camera size={14} /> Save frame</button
               >
@@ -726,8 +844,13 @@
                 {selected}
                 onSeek={seek}
                 onSelect={(id) => (selected = id)}
-                onReorder={(id, index) => apply('Reorder', moveMain(project, id, index))}
-                onMove={move}
+                onMove={(id, start) => apply('Move', moveItem(project, id, start))}
+                onResize={trim}
+                onLane={(id, lane) => apply('Move', moveToLane(project, id, lane))}
+                {soloView}
+                {soloHear}
+                onSoloView={(lane) => (soloView = soloView === lane ? null : lane)}
+                onSoloHear={(lane) => (soloHear = soloHear === lane ? null : lane)}
               />
             {/if}
           </section>
@@ -827,17 +950,6 @@
                         onchange={(e) => patchMain('Fade out', { fadeOut: Math.max(0, num(e)) })}
                       /></label
                     >
-                    <label class="grid gap-1 text-xs text-muted"
-                      >Crossfade<input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        class={field}
-                        value={selectedMain.transition}
-                        onchange={(e) =>
-                          patchMain('Crossfade', { transition: Math.max(0, num(e)) })}
-                      /></label
-                    >
                   </div>
                   <div class="flex gap-1.5">
                     <button
@@ -906,7 +1018,7 @@
                         class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs {cropping ===
                         selectedMain.id
                           ? 'border-accent bg-accent-soft text-accent'
-                          : 'border-line'}"
+                          : 'border-line hover:border-accent hover:text-accent'}"
                         aria-pressed={cropping === selectedMain.id}
                         onclick={() =>
                           (cropping = cropping === selectedMain.id ? null : selectedMain.id)}
@@ -915,20 +1027,25 @@
                       >
                       <button
                         type="button"
-                        class="rounded-full border border-line px-2.5 py-1 text-xs"
+                        class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2.5 py-1 text-xs"
                         title="Crop to the project shape, so the clip fills the frame"
                         onclick={() => setCrop(selectedMain, fillCrop(selectedMain))}
                         >Fill the frame</button
                       >
                       <button
                         type="button"
-                        class="rounded-full border border-line px-2.5 py-1 text-xs disabled:opacity-40"
+                        class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2.5 py-1 text-xs disabled:opacity-40"
                         disabled={!selectedMain.transform.crop}
                         onclick={() => setCrop(selectedMain, null)}>Remove crop</button
                       >
                     </div>
                   </div>
                 </section>
+                <ChromaKeyFields
+                  value={selectedMain.key}
+                  onChange={(label, key) =>
+                    apply(label, updateMain(project, selectedMain.id, { key }))}
+                />
               {:else if selectedOverlay}
                 <section class="space-y-2">
                   <h3 class="inline-flex items-center gap-1.5 font-medium">
@@ -968,29 +1085,38 @@
                       /></label
                     >
                   </div>
-                  <label class="grid gap-1 text-xs"
-                    >Size<input
+                  <label class="grid gap-1 text-xs">
+                    <span class="flex justify-between"
+                      >Volume <span class="text-muted">{db(selectedOverlay.volume)} dB</span></span
+                    >
+                    <input
                       type="range"
-                      min="0.05"
-                      max="1"
-                      step="0.01"
-                      value={selectedOverlay.rect.width}
+                      min="-30"
+                      max="12"
+                      step="0.5"
+                      value={Number(db(selectedOverlay.volume))}
                       class="accent-accent"
-                      oninput={(e) => {
-                        const w = num(e);
-                        const ratio = selectedOverlay.rect.height / selectedOverlay.rect.width;
+                      oninput={(e) =>
                         apply(
-                          'Overlay size',
+                          'Volume',
                           updateOverlay(project, selectedOverlay.id, {
-                            rect: {
-                              ...selectedOverlay.rect,
-                              width: w,
-                              height: Math.min(1, w * ratio),
-                            },
+                            volume: 10 ** (num(e) / 20),
                           }),
-                        );
-                      }}
-                    /></label
+                        )}
+                    />
+                  </label>
+                  <label class="flex items-center gap-2 text-xs"
+                    ><input
+                      type="checkbox"
+                      checked={selectedOverlay.muted}
+                      onchange={(e) =>
+                        apply(
+                          'Mute',
+                          updateOverlay(project, selectedOverlay.id, {
+                            muted: (e.currentTarget as HTMLInputElement).checked,
+                          }),
+                        )}
+                    /> Mute this overlay's sound</label
                   >
                   <label class="grid gap-1 text-xs"
                     >Opacity<input
@@ -1007,24 +1133,12 @@
                         )}
                     /></label
                   >
-                  <div class="grid grid-cols-3 gap-1 text-xs">
-                    {#each [['Top left', 0.03, 0.03], ['Top', 0.5, 0.03], ['Top right', 0.97, 0.03], ['Left', 0.03, 0.5], ['Centre', 0.5, 0.5], ['Right', 0.97, 0.5], ['Bottom left', 0.03, 0.97], ['Bottom', 0.5, 0.97], ['Bottom right', 0.97, 0.97]] as const as [label, ax, ay] (label)}
-                      <button
-                        type="button"
-                        class="rounded-lg border border-line px-1 py-1"
-                        onclick={() => {
-                          const r = selectedOverlay.rect;
-                          const x = Math.min(1 - r.width, Math.max(0, ax - r.width * ax));
-                          const y = Math.min(1 - r.height, Math.max(0, ay - r.height * ay));
-                          apply(
-                            'Overlay position',
-                            updateOverlay(project, selectedOverlay.id, { rect: { ...r, x, y } }),
-                          );
-                        }}>{label}</button
-                      >
-                    {/each}
-                  </div>
                 </section>
+                <ChromaKeyFields
+                  value={selectedOverlay.key}
+                  onChange={(label, key) =>
+                    apply(label, updateOverlay(project, selectedOverlay.id, { key }))}
+                />
               {:else if selectedMusic}
                 <section class="space-y-2">
                   <h3 class="inline-flex items-center gap-1.5 font-medium">
@@ -1178,25 +1292,6 @@
                 onAddFont={addFont}
               />
 
-              {#if project.redactions.length}
-                <section class="space-y-1">
-                  <h3 class="font-medium">Covered areas</h3>
-                  {#each project.redactions as r, index (r.id)}
-                    <button
-                      type="button"
-                      class="block w-full rounded-lg px-2 py-1 text-left text-xs {r.id === selected
-                        ? 'bg-accent-soft'
-                        : ''}"
-                      onclick={() => ((selected = r.id), seek(r.from))}
-                    >
-                      {index + 1}. {r.kind === 'fill' ? 'Solid box' : r.kind} · {r.from.toFixed(
-                        1,
-                      )}–{r.to.toFixed(1)} s
-                    </button>
-                  {/each}
-                </section>
-              {/if}
-
               <section class="space-y-2">
                 <h3 class="font-medium">Project</h3>
                 <OverallVolume
@@ -1237,7 +1332,9 @@
                     value={project.fps}
                     onchange={(e) => apply('Frame rate', { ...project, fps: num(e) })}
                   >
-                    {#each [24, 25, 30, 50, 60] as f (f)}<option value={f}>{f} fps</option>{/each}
+                    {#each [...new Set( [project.fps, 24, 25, 30, 50, 60] )].sort((a, b) => a - b) as f (f)}<option
+                        value={f}>{f} fps</option
+                      >{/each}
                   </select>
                 </label>
               </section>
@@ -1302,6 +1399,15 @@
                     onclick={runExport}>Export</button
                   >
                 {/if}
+                {#if !exporting}<label class="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      class="accent-accent"
+                      checked={files.autoDownload}
+                      onchange={(e) => files.setAutoDownload(e.currentTarget.checked)}
+                    />
+                    Download when it's done
+                  </label>{/if}
                 {#if exportError}<p class="text-danger">{exportError}</p>{/if}
                 {#if exported}
                   <div class="space-y-1 rounded-xl bg-sunken p-3">

@@ -1,13 +1,27 @@
 // Draws one frame of a video project onto a 2D canvas. Used for both preview and export.
 import { fadeCurve } from '../audio/dsp';
-import { mainAt, mainLength, type Transform, type VideoProject } from '../../project/video';
+import {
+  IDENTITY,
+  visualsAt,
+  type ChromaKey,
+  type TimedRedaction,
+  type Transform,
+  type VideoProject,
+} from '../../project/video';
 import { cueAt } from '../../captions/cues';
 import type { Drawable } from './frames';
+import { applyChromaKey } from './chroma';
 import { drawText } from './text';
 
 type Ctx = OffscreenCanvasRenderingContext2D;
 
-export type FrameLookup = (assetId: string, time: number) => Promise<Drawable | null>;
+// `use` names the clip or overlay asking, so each use of one file keeps its own decoder rather than one
+// decoder seeking back and forth between them. `begin` is called before each frame's lookups.
+export type FrameLookup = ((
+  assetId: string,
+  time: number,
+  use: string,
+) => Promise<Drawable | null>) & { begin?: () => void };
 
 // Resolves once every named family can be drawn.
 export type FontLoader = (families: ReadonlySet<string>) => Promise<void>;
@@ -15,6 +29,7 @@ export type FontLoader = (families: ReadonlySet<string>) => Promise<void>;
 export class Compositor {
   private oriented = new OffscreenCanvas(1, 1);
   private small = new OffscreenCanvas(1, 1);
+  private keyed = new OffscreenCanvas(1, 1);
 
   constructor(
     private readonly ctx: Ctx,
@@ -36,89 +51,88 @@ export class Compositor {
     ctx.fillStyle = project.background;
     ctx.fillRect(0, 0, W, H);
 
-    for (const { clip, source, alpha } of mainAt(project, time)) {
-      const drawable = await frames(clip.assetId, source);
-      if (!drawable) continue;
-      const local = (source - clip.in) / clip.speed;
-      const length = mainLength(clip);
-      let fade = 1;
-      if (clip.fadeIn > 0 && local < clip.fadeIn) fade *= fadeCurve(local / clip.fadeIn);
-      if (clip.fadeOut > 0 && local > length - clip.fadeOut)
-        fade *= fadeCurve((length - local) / clip.fadeOut);
-      ctx.globalAlpha = alpha * fade;
-      this.drawFitted(drawable, clip.transform, { x: 0, y: 0, width: W, height: H }, project.fit);
-    }
+    const visuals = visualsAt(project, time);
+    const cues = project.captions.burn ? cueAt(project.captions.cues, time) : [];
+    const families = new Set<string>();
+    for (const v of visuals) if (v.kind === 'text') families.add(v.text.style.font);
+    if (cues.length) families.add(project.captions.style.font);
+    if (families.size) await this.fonts(families);
 
-    for (const overlay of project.overlay) {
-      const local = time - overlay.start;
-      if (local < 0 || local >= overlay.out - overlay.in) continue;
-      const drawable = await frames(overlay.assetId, overlay.in + local);
-      if (!drawable) continue;
-      ctx.globalAlpha = overlay.opacity;
-      const rect = {
-        x: overlay.rect.x * W,
-        y: overlay.rect.y * H,
-        width: overlay.rect.width * W,
-        height: overlay.rect.height * H,
-      };
-      this.drawFitted(
-        drawable,
-        { crop: null, rotate: 0, flipH: false, flipV: false },
-        rect,
-        'contain',
-      );
+    frames.begin?.();
+    for (const v of visuals) {
+      ctx.globalAlpha = 1;
+      if (v.kind === 'clip') {
+        const drawable = await frames(v.clip.assetId, v.source, v.clip.id);
+        if (!drawable) continue;
+        ctx.globalAlpha = fadeCurve(v.alpha);
+        this.drawFitted(
+          drawable,
+          v.clip.transform,
+          { x: 0, y: 0, width: W, height: H },
+          project.fit,
+          v.clip.key,
+        );
+      } else if (v.kind === 'overlay') {
+        const drawable = await frames(v.overlay.assetId, v.source, v.overlay.id);
+        if (!drawable) continue;
+        ctx.globalAlpha = v.overlay.opacity;
+        const r = v.overlay.rect;
+        this.drawFitted(
+          drawable,
+          IDENTITY,
+          { x: r.x * W, y: r.y * H, width: r.width * W, height: r.height * H },
+          'contain',
+          v.overlay.key,
+        );
+      } else if (v.kind === 'text') {
+        const r = v.text.rect;
+        drawText(ctx, v.text.text, v.text.style, W, H, fadeCurve(v.alpha), {
+          x: r.x * W,
+          y: r.y * H,
+          width: r.width * W,
+          height: r.height * H,
+        });
+      } else {
+        this.redact(v.redaction, W, H);
+      }
     }
 
     ctx.globalAlpha = 1;
-    for (const r of project.redactions) {
-      if (time < r.from || time >= r.to) continue;
-      const x = Math.round(r.rect.x * W);
-      const y = Math.round(r.rect.y * H);
-      const w = Math.max(1, Math.round(r.rect.width * W));
-      const h = Math.max(1, Math.round(r.rect.height * H));
-      if (r.kind === 'fill') {
-        ctx.fillStyle = r.color;
-        ctx.fillRect(x, y, w, h);
-      } else if (r.kind === 'blur') {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(x, y, w, h);
-        ctx.clip();
-        ctx.filter = `blur(${Math.max(4, Math.min(w, h) / 6)}px)`;
-        ctx.drawImage(ctx.canvas, x, y, w, h, x, y, w, h);
-        ctx.restore();
-      } else {
-        const block = Math.max(4, Math.round(Math.min(w, h) / 8));
-        const sw = Math.max(1, Math.round(w / block));
-        const sh = Math.max(1, Math.round(h / block));
-        this.small.width = sw;
-        this.small.height = sh;
-        const s = this.small.getContext('2d')!;
-        s.drawImage(ctx.canvas, x, y, w, h, 0, 0, sw, sh);
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(this.small, 0, 0, sw, sh, x, y, w, h);
-        ctx.imageSmoothingEnabled = true;
-      }
-    }
-
-    const texts = project.texts.filter((t) => time >= t.start && time < t.start + t.duration);
-    const cues = project.captions.burn ? cueAt(project.captions.cues, time) : [];
-    if (texts.length || cues.length) {
-      const families = new Set(texts.map((t) => t.style.font));
-      if (cues.length) families.add(project.captions.style.font);
-      await this.fonts(families);
-      for (const t of texts) {
-        const local = time - t.start;
-        let fade = 1;
-        if (t.fadeIn > 0 && local < t.fadeIn) fade *= fadeCurve(local / t.fadeIn);
-        if (t.fadeOut > 0 && local > t.duration - t.fadeOut)
-          fade *= fadeCurve((t.duration - local) / t.fadeOut);
-        drawText(ctx, t.text, t.style, W, H, fade);
-      }
-      if (cues.length)
-        drawText(ctx, cues.map((c) => c.text).join('\n'), project.captions.style, W, H);
-    }
+    if (cues.length)
+      drawText(ctx, cues.map((c) => c.text).join('\n'), project.captions.style, W, H);
     ctx.restore();
+  }
+
+  // Covers part of everything drawn so far.
+  private redact(r: TimedRedaction, W: number, H: number) {
+    const ctx = this.ctx;
+    const x = Math.round(r.rect.x * W);
+    const y = Math.round(r.rect.y * H);
+    const w = Math.max(1, Math.round(r.rect.width * W));
+    const h = Math.max(1, Math.round(r.rect.height * H));
+    if (r.kind === 'fill') {
+      ctx.fillStyle = r.color;
+      ctx.fillRect(x, y, w, h);
+    } else if (r.kind === 'blur') {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, w, h);
+      ctx.clip();
+      ctx.filter = `blur(${Math.max(4, Math.min(w, h) / 6)}px)`;
+      ctx.drawImage(ctx.canvas, x, y, w, h, x, y, w, h);
+      ctx.restore();
+    } else {
+      const block = Math.max(4, Math.round(Math.min(w, h) / 8));
+      const sw = Math.max(1, Math.round(w / block));
+      const sh = Math.max(1, Math.round(h / block));
+      this.small.width = sw;
+      this.small.height = sh;
+      const s = this.small.getContext('2d')!;
+      s.drawImage(ctx.canvas, x, y, w, h, 0, 0, sw, sh);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(this.small, 0, 0, sw, sh, x, y, w, h);
+      ctx.imageSmoothingEnabled = true;
+    }
   }
 
   // Orients the frame (its own rotation plus the clip's), crops, then fits it into `box`.
@@ -127,6 +141,7 @@ export class Compositor {
     t: Transform,
     box: { x: number; y: number; width: number; height: number },
     fit: 'contain' | 'cover',
+    key: ChromaKey | null = null,
   ) {
     const rotation = (((d.rotation + t.rotate) % 360) + 360) % 360;
     const sideways = rotation === 90 || rotation === 270;
@@ -163,7 +178,24 @@ export class Compositor {
     this.ctx.beginPath();
     this.ctx.rect(box.x, box.y, box.width, box.height);
     this.ctx.clip();
-    this.ctx.drawImage(canvas, sx, sy, sw, sh, dx, dy, dw, dh);
+    if (key) {
+      // Keyed at the size it is drawn, which is cheaper than at the source size for a small preview.
+      const w = Math.max(1, Math.round(dw));
+      const h = Math.max(1, Math.round(dh));
+      if (this.keyed.width !== w || this.keyed.height !== h) {
+        this.keyed.width = w;
+        this.keyed.height = h;
+      }
+      const k = this.keyed.getContext('2d', { willReadFrequently: true })!;
+      k.clearRect(0, 0, w, h);
+      k.drawImage(canvas, sx, sy, sw, sh, 0, 0, w, h);
+      const pixels = k.getImageData(0, 0, w, h);
+      applyChromaKey(pixels.data, key);
+      k.putImageData(pixels, 0, 0);
+      this.ctx.drawImage(this.keyed, dx, dy, dw, dh);
+    } else {
+      this.ctx.drawImage(canvas, sx, sy, sw, sh, dx, dy, dw, dh);
+    }
     this.ctx.restore();
   }
 }

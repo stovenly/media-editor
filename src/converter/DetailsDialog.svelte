@@ -15,7 +15,7 @@
   });
 
   const metadataLine = $derived.by(() => {
-    const mode = files.options.metadata;
+    const mode = item?.options.metadata ?? files.options.metadata;
     if (mode === 'all') return 'All metadata will be kept.';
     if (mode === 'technical')
       return 'Only the colour profile will be kept. Everything below will be removed.';

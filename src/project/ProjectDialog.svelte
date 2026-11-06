@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PICKER_ACCEPT } from '../io/formats';
   import { CircleCheck, CircleDashed, LoaderCircle } from '@lucide/svelte';
   import { Dialog } from 'bits-ui';
   import { untrack } from 'svelte';
@@ -102,6 +103,7 @@
         bind:this={mediaPicker}
         type="file"
         multiple
+        accept={PICKER_ACCEPT}
         class="hidden"
         aria-label="Project media files"
         onchange={(e) => projects.intake(picked(e))}

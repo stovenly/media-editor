@@ -1,3 +1,4 @@
+import { HostUnreachable } from '../engine/downloads.svelte';
 import { messageOf } from '../engine/errors';
 import { isMemoryFailure } from '../engine/scheduler/scheduler.svelte';
 
@@ -15,6 +16,9 @@ export function plainError(error: unknown): string {
     )
   ) {
     return "This file couldn't be decoded. It may be damaged or use a variant this app can't read.";
+  }
+  if (error instanceof HostUnreachable) {
+    return "The server can't be reached. This conversion needs a one-time download, so try again once it's back up.";
   }
   if (/Couldn't download|Failed to fetch|NetworkError|engine list/i.test(message)) {
     return "The converter couldn't be downloaded. Check your connection and try again.";

@@ -1,37 +1,26 @@
 <script lang="ts">
-  import { Keyboard } from '@lucide/svelte';
   import Converter from '../converter/Converter.svelte';
   import { projects } from '../project/open.svelte';
   import ProjectDialog from '../project/ProjectDialog.svelte';
+  import Corners from './Corners.svelte';
   import DropTarget from './DropTarget.svelte';
   import { receiveLaunchedFiles } from './launch';
-  import { shortcutHelp } from './shortcuts.svelte';
-  import ShortcutsDialog from './ShortcutsDialog.svelte';
 
   receiveLaunchedFiles((launched) => projects.intake(launched));
-  import ThemeToggle from './ui/ThemeToggle.svelte';
 </script>
 
 <DropTarget onFiles={(dropped) => projects.intake(dropped)} />
 <ProjectDialog />
-<ShortcutsDialog />
+<Corners />
 
 <div class="flex min-h-dvh flex-col">
-  <header class="mx-auto flex w-full max-w-3xl items-center justify-between px-5 py-4">
-    <h1 class="font-semibold tracking-tight">Media Editor</h1>
-    <div class="flex items-center gap-2">
-      <button
-        type="button"
-        class="icon-button"
-        aria-label="Keyboard shortcuts"
-        title="Keyboard shortcuts (?)"
-        onclick={() => (shortcutHelp.open = true)}><Keyboard size={16} /></button
-      >
-      <ThemeToggle />
+  <header class="sticky top-0 z-20 h-12 shrink-0 border-b border-line bg-raised">
+    <div class="mx-auto flex h-full max-w-[1400px] items-center px-10">
+      <h1 class="font-semibold tracking-tight">Media Editor</h1>
     </div>
   </header>
 
-  <main class="mx-auto w-full max-w-3xl flex-1 px-5 pb-16">
+  <main class="mx-auto flex w-full max-w-[1400px] flex-1 flex-col px-10">
     <Converter />
   </main>
 </div>

@@ -44,3 +44,26 @@ test('joins clips, adds an overlay and music, and exports MP4', async ({ page, b
   expect(bytes.subarray(4, 8).toString()).toBe('ftyp');
   expect(errors).toEqual([]);
 });
+
+test('plays backwards and stops back at the start', async ({ page, browserName }) => {
+  test.skip(browserName === 'webkit', 'Video editing needs WebCodecs');
+  await page.goto(NATIVE);
+  await page.locator('input[type=file][multiple]').setInputFiles({
+    name: 'clip.mp4',
+    mimeType: 'video/mp4',
+    buffer: readFileSync(join(FIXTURES, 'clip.mp4')),
+  });
+  await page.getByRole('button', { name: 'Edit clip.mp4' }).click();
+  const clock = page.locator('span.font-mono.tabular-nums').first();
+  await expect(clock).toHaveText(/^0:00\.00 \/ 0:02\.00$/, { timeout: 30_000 });
+
+  await page.getByRole('button', { name: 'Play backwards' }).click();
+  await expect(clock).toHaveText(/^0:01\.[0-8]\d/, { timeout: 5_000 });
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  const paused = await clock.textContent();
+  await page.waitForTimeout(300);
+  await expect(clock).toHaveText(paused!);
+
+  await page.getByRole('button', { name: 'Stop' }).click();
+  await expect(clock).toHaveText(/^0:00\.00/);
+});
