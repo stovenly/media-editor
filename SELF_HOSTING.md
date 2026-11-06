@@ -12,8 +12,8 @@ npm run build                       # served from the site root
 BASE_PATH=/media-editor/ npm run build   # served from a sub-path
 ```
 
-The output is `dist/`, about 70 MB. Most of it is the WebAssembly engines in
-`dist/wasm/<engine>-<version>/`, which are only downloaded the first time a
+The output is `docs/`, about 70 MB. Most of it is the WebAssembly engines in
+`docs/wasm/<engine>-<version>/`, which are only downloaded the first time a
 conversion needs them. A first visit downloads about 4 MB.
 
 `npm run build` copies the engines out of `node_modules` first
@@ -84,7 +84,7 @@ Downloaded engines are kept across updates until their version changes.
 
 GitHub Pages can't send headers, which is what the service worker is for. Build
 with `BASE_PATH` set to `/<repository>/` (or `/` for a user site or a custom
-domain) and publish `dist/`, for example with the official
+domain) and publish `docs/`, for example with the official
 `actions/upload-pages-artifact` and `actions/deploy-pages` actions.
 
 ## Installing and "Open with"

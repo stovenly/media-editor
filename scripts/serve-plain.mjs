@@ -1,10 +1,10 @@
-// Serves dist/ with no response headers beyond Content-Type, like GitHub Pages
+// Serves docs/ with no response headers beyond Content-Type, like GitHub Pages
 // without the service worker. Used by the e2e suite.
 import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 
-const root = 'dist';
+const root = 'docs';
 const port = Number(process.argv[2] ?? 4174);
 const types = {
   '.html': 'text/html; charset=utf-8',

@@ -1,5 +1,5 @@
 package-lock.json
-dist/
+docs/
 public/wasm/
 LICENSE
 SPEC.md

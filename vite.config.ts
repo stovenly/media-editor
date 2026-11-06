@@ -98,7 +98,7 @@ function previewCsp(): Plugin {
 
 function publicFiles(): string[] {
   return readdirSync('public', { withFileTypes: true })
-    .filter((entry) => entry.isFile())
+    .filter((entry) => entry.isFile() && !entry.name.startsWith('.'))
     .map((entry) => entry.name);
 }
 
@@ -109,6 +109,8 @@ export default defineConfig({
   preview: { headers: ISOLATION },
   worker: { format: 'es' },
   build: {
+    // GitHub Pages serves a branch's /docs folder.
+    outDir: 'docs',
     target: 'es2023',
     // Scripts loaded by URL (the AudioWorklet) must stay files: the CSP forbids data: scripts.
     assetsInlineLimit: (file) => (file.endsWith('.js') ? false : undefined),
