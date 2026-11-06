@@ -1,0 +1,25 @@
+{
+  "vips": {
+    "dir": "vips-0.0.19",
+    "files": {
+      "vips-es6.js": 83765,
+      "vips.wasm": 5154052,
+      "vips-jxl.wasm": 2224543,
+      "vips-heif.wasm": 3802681,
+      "vips-resvg.wasm": 1176530
+    }
+  },
+  "magick": {
+    "dir": "magick-0.0.44",
+    "files": {
+      "magick.wasm": 15447097
+    }
+  },
+  "ffmpeg": {
+    "dir": "ffmpeg-0.12.10",
+    "files": {
+      "ffmpeg-core.js": 111804,
+      "ffmpeg-core.wasm": 32232419
+    }
+  }
+}

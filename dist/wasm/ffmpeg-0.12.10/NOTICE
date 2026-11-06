@@ -1,0 +1,5 @@
+FFmpeg, built by ffmpeg.wasm core 0.12.10, is licensed under the GNU General
+Public License, version 2 or later: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+
+Corresponding source, with the pinned versions of FFmpeg and every library in it:
+https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v0.12.10
