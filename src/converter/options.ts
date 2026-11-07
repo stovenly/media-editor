@@ -28,7 +28,7 @@ export type ConvertOptions = {
 };
 
 export const DEFAULT_OPTIONS: ConvertOptions = {
-  quality: 82,
+  quality: 100,
   maxEdge: null,
   height: null,
   targetMb: null,

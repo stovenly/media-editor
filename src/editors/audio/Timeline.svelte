@@ -1,6 +1,7 @@
 <script lang="ts">
   import { clipEnd, projectDuration, type AudioClip, type AudioProject } from '../../project/audio';
   import { PEAKS_PER_SECOND } from './session.svelte';
+  import { themeColours } from '../shared/theme-colours';
 
   export type Selection = { from: number; to: number; trackId: string | null } | null;
 
@@ -49,18 +50,15 @@
     return () => observer.disconnect();
   });
 
-  const styles = () => {
-    const css = getComputedStyle(document.documentElement);
-    const v = (name: string) => css.getPropertyValue(name).trim();
-    return {
-      line: v('--border'),
-      muted: v('--text-muted'),
-      text: v('--text'),
-      accent: v('--accent'),
-      raised: v('--surface-raised'),
-      soft: v('--accent-soft'),
-    };
-  };
+  const styles = () =>
+    themeColours({
+      line: '--border',
+      muted: '--text-muted',
+      text: '--text',
+      accent: '--accent',
+      raised: '--surface-raised',
+      soft: '--accent-soft',
+    });
 
   $effect(() => {
     if (!canvas) return;

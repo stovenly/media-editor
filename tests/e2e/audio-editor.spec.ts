@@ -26,7 +26,8 @@ async function open(page: Page) {
 }
 
 async function exportAs(page: Page, label: string): Promise<Buffer> {
-  await page.getByRole('combobox', { name: 'Export format' }).selectOption({ label });
+  await page.getByRole('combobox', { name: 'Export format' }).click();
+  await page.getByRole('option', { name: label, exact: true }).click();
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const download = page.getByRole('button', { name: /^Download / });
   await expect(download).toBeVisible({ timeout: 90_000 });

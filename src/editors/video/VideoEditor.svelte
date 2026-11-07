@@ -7,7 +7,13 @@
     ChevronLeft,
     ChevronRight,
     Download,
+    Droplets,
+    Expand,
     FlipHorizontal2,
+    Grid3x3,
+    Shrink,
+    Volume2,
+    VolumeX,
     FlipVertical2,
     Image as ImageIcon,
     Layers,
@@ -29,6 +35,14 @@
   } from '@lucide/svelte';
   import { Dialog } from 'bits-ui';
   import { formatBytes } from '../../app/format';
+  import { provideProjectColours } from '../../app/ui/ColourField.svelte';
+  import IconToggle from '../../app/ui/IconToggle.svelte';
+  import NumberField from '../../app/ui/NumberField.svelte';
+  import QualityPicker from '../../app/ui/QualityPicker.svelte';
+  import Section from '../../app/ui/Section.svelte';
+  import Segmented, { type SegmentedOption } from '../../app/ui/Segmented.svelte';
+  import Slider from '../../app/ui/Slider.svelte';
+  import Switch from '../../app/ui/Switch.svelte';
   import { files, type FileItem } from '../../converter/files.svelte';
   import { wakeLock } from '../../converter/wake-lock.svelte';
   import { hub } from '../../engine';
@@ -51,6 +65,7 @@
     duplicateItem,
     fromFirstItem,
     laneItems,
+    mainLength,
     moveItem,
     moveToLane,
     newVideoProject,
@@ -67,6 +82,8 @@
     updateText,
     videoDuration,
     type MainClip,
+    type MusicClip,
+    type OverlayClip,
     type TimedRedaction,
     type VideoProject,
   } from '../../project/video';
@@ -156,6 +173,54 @@
   const selectedRedaction = $derived(project?.redactions.find((r) => r.id === selected) ?? null);
   const selectedText = $derived(project?.texts.find((t) => t.id === selected) ?? null);
 
+  provideProjectColours(() => {
+    if (!project) return [];
+    const styles = [...project.texts.map((t) => t.style), project.captions.style];
+    return [
+      ...styles.flatMap((s) => [s.color, s.outlineColor, ...(s.box ? [s.box] : [])]),
+      ...[...project.main, ...project.overlay].flatMap((c) => (c.key ? [c.key.color] : [])),
+      ...project.redactions.map((r) => r.color),
+      project.background,
+    ];
+  });
+
+  // While on, the preview shows the selected clip without its key, and a click there sets the key colour.
+  let pickingKey = $state(false);
+  $effect(() => {
+    void selected;
+    pickingKey = false;
+  });
+  const picking = $derived(pickingKey && !!(selectedMain?.key || selectedOverlay?.key));
+  const pickView = $derived.by(() => {
+    if (!seen || !picking) return seen;
+    if (selectedMain) return updateMain(seen, selectedMain.id, { key: null });
+    if (selectedOverlay) return updateOverlay(seen, selectedOverlay.id, { key: null });
+    return seen;
+  });
+
+  function startPicking(on: boolean) {
+    if (on) halt();
+    pickingKey = on;
+  }
+
+  async function pickKey(event: MouseEvent) {
+    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const [x, y] =
+      event.detail === 0
+        ? [0.5, 0.5]
+        : [(event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height];
+    const main = selectedMain;
+    const overlay = selectedOverlay;
+    const color = await session.colourAt(x, y);
+    pickingKey = false;
+    const current = history.state;
+    if (!color || !current) return;
+    if (main?.key)
+      apply('Key colour', updateMain(current, main.id, { key: { ...main.key, color } }));
+    else if (overlay?.key)
+      apply('Key colour', updateOverlay(current, overlay.id, { key: { ...overlay.key, color } }));
+  }
+
   // Everything on the timeline, for announcements.
   const items = $derived.by(() => {
     if (!project) return [];
@@ -226,7 +291,7 @@
 
   $effect(() => {
     if (cropView) session.render(cropView.project, cropView.time);
-    else if (seen && !playing) session.render(seen, position);
+    else if (pickView && !playing) session.render(pickView, position);
   });
 
   // Playback position comes from the audio clock.
@@ -344,20 +409,24 @@
     if (project) seek(position + frames / project.fps);
   }
 
+  const sourceSize = $derived.by(() => {
+    const first = project?.main.map((c) => session.assets.get(c.assetId)).find((a) => a?.hasVideo);
+    return first
+      ? ([Math.round(first.width / 2) * 2, Math.round(first.height / 2) * 2] as const)
+      : null;
+  });
+
+  const shape = $derived.by(() => {
+    if (!project) return null;
+    const { width, height } = project;
+    if (sourceSize && sourceSize[0] === width && sourceSize[1] === height) return 'source';
+    return Object.entries(ASPECTS).find(([, [w, h]]) => w === width && h === height)?.[0] ?? null;
+  });
+
   function setAspect(key: string) {
     if (!project) return;
-    if (key === 'source') {
-      const first = project.main.map((c) => session.assets.get(c.assetId)).find((a) => a?.hasVideo);
-      if (first)
-        apply('Aspect', {
-          ...project,
-          width: Math.round(first.width / 2) * 2,
-          height: Math.round(first.height / 2) * 2,
-        });
-      return;
-    }
-    const [width, height] = ASPECTS[key as keyof typeof ASPECTS];
-    apply('Aspect', { ...project, width, height });
+    const size = key === 'source' ? sourceSize : ASPECTS[key as keyof typeof ASPECTS];
+    if (size) apply('Aspect', { ...project, width: size[0], height: size[1] });
   }
 
   async function saveFrame() {
@@ -482,23 +551,18 @@
       apply('Redaction', updateRedaction(project, selectedRedaction.id, patch));
   }
 
-  const estimate = $derived(
-    project
-      ? exportMb
-        ? exportMb * 1_000_000
-        : ((videoBitrate(
-            project.width,
-            project.height,
-            project.fps,
-            exportQuality,
-            exportFormat === 'mp4' ? 'avc' : 'vp9',
-            sourceBitsPerPixel(project, session.assets),
-          ) +
-            160_000) *
-            duration) /
-          8
-      : null,
-  );
+  function estimate(quality: number): number | null {
+    if (!project) return null;
+    const video = videoBitrate(
+      project.width,
+      project.height,
+      project.fps,
+      quality,
+      exportFormat === 'mp4' ? 'avc' : 'vp9',
+      sourceBitsPerPixel(project, session.assets),
+    );
+    return ((video + 160_000) * duration) / 8;
+  }
 
   async function runExport() {
     if (!project) return;
@@ -536,7 +600,12 @@
 
   function keydown(event: KeyboardEvent) {
     const mod = event.ctrlKey || event.metaKey;
-    if ((event.target as HTMLElement).closest('input, select, textarea, [role=slider]')) return;
+    if (
+      (event.target as HTMLElement).closest(
+        'input, select, textarea, [role=slider], [role=radio], [role=switch], [role=combobox], [role=listbox]',
+      )
+    )
+      return;
     if (mod && event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) history.redo();
@@ -551,12 +620,119 @@
   }
 
   const time = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
-  const db = (gain: number) => (20 * Math.log10(Math.max(gain, 1e-6))).toFixed(1);
-  const num = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
-  const field = 'w-full min-w-0 rounded-lg border border-line bg-surface px-2 py-1 text-sm';
+  const db = (gain: number) => 20 * Math.log10(Math.max(gain, 1e-6));
+
+  const SPEED_MARKS = [
+    { value: 0.5, label: '0.5×' },
+    { value: 1, label: '1×' },
+    { value: 2, label: '2×' },
+  ];
+  const REDACTION_KINDS: SegmentedOption<TimedRedaction['kind']>[] = [
+    { value: 'fill', label: 'Box', icon: Square, tooltip: 'Solid box (redact)' },
+    { value: 'blur', label: 'Blur', icon: Droplets, tooltip: 'Blur (cosmetic)' },
+    { value: 'pixelate', label: 'Pixelate', icon: Grid3x3, tooltip: 'Pixelate (cosmetic)' },
+  ];
+  const FITS: SegmentedOption<VideoProject['fit']>[] = [
+    { value: 'contain', label: 'Fit', icon: Shrink, tooltip: 'Fit inside, with bars' },
+    { value: 'cover', label: 'Fill', icon: Expand, tooltip: 'Fill, cropping the edges' },
+  ];
+  const EXPORT_FORMATS: SegmentedOption<'mp4' | 'webm'>[] = [
+    { value: 'mp4', label: 'MP4', tooltip: 'MP4 (H.264)' },
+    { value: 'webm', label: 'WebM', tooltip: 'WebM (VP9)' },
+  ];
+  const EXPORT_METHODS: SegmentedOption<'fast' | 'exact'>[] = [
+    { value: 'fast', label: 'Fast' },
+    { value: 'exact', label: 'Exact' },
+  ];
 </script>
 
 <svelte:window onkeydown={keydown} />
+
+{#snippet volume(
+  label: string,
+  gain: number,
+  min: number,
+  max: number,
+  onGain: (gain: number) => void,
+  muteLabel?: string,
+  muted?: boolean,
+  onMute?: (muted: boolean) => void,
+)}
+  <div class="flex items-start gap-2">
+    <div class="min-w-0 flex-1">
+      <Slider
+        {label}
+        value={db(gain)}
+        {min}
+        {max}
+        step={0.5}
+        decimals={1}
+        defaultValue={0}
+        unit="dB"
+        signed
+        onChange={(v) => onGain(10 ** (v / 20))}
+      />
+    </div>
+    {#if muteLabel && onMute}
+      <div class="mt-5.5">
+        <IconToggle
+          label={muteLabel}
+          pressed={muted ?? false}
+          icon={Volume2}
+          pressedIcon={VolumeX}
+          onChange={onMute}
+        />
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet fades(
+  fadeIn: number,
+  fadeOut: number,
+  length: number,
+  onIn: (seconds: number) => void,
+  onOut: (seconds: number) => void,
+)}
+  {@const max = Math.max(0.1, Math.min(10, length / 2))}
+  <Slider
+    label="Fade in"
+    value={fadeIn}
+    min={0}
+    {max}
+    step={0.1}
+    defaultValue={0}
+    unit="s"
+    onChange={onIn}
+  />
+  <Slider
+    label="Fade out"
+    value={fadeOut}
+    min={0}
+    {max}
+    step={0.1}
+    defaultValue={0}
+    unit="s"
+    onChange={onOut}
+  />
+{/snippet}
+
+{#snippet shapeTile(option: SegmentedOption<string>)}
+  {@const [w, h] =
+    option.value === 'source'
+      ? (sourceSize ?? [16, 9])
+      : ASPECTS[option.value as keyof typeof ASPECTS]}
+  <span class="flex flex-col items-center gap-1 py-0.5">
+    <span class="grid size-5 place-items-center" aria-hidden="true">
+      <span
+        class="block rounded-[2px] border-[1.5px] border-current"
+        style:width="{(w >= h ? 1 : w / h) * 20}px"
+        style:height="{(h >= w ? 1 : h / w) * 20}px"
+      ></span>
+    </span>
+    <span class="text-[11px] leading-none">{option.label}</span>
+  </span>
+{/snippet}
 
 <p class="sr-only" aria-live="polite">{announcement}</p>
 
@@ -681,6 +857,13 @@
                     aspect={null}
                     onChange={(rect, label) => setCrop(cropView.clip, rect, label)}
                   />
+                {:else if picking}
+                  <button
+                    type="button"
+                    class="absolute inset-0 cursor-crosshair"
+                    aria-label="Take the key colour from here"
+                    onclick={pickKey}
+                  ></button>
                 {:else if project && drawingRedaction}
                   <RedactOverlay
                     redactions={[]}
@@ -817,15 +1000,16 @@
                 title="Save the frame at the playhead as a PNG"
                 onclick={saveFrame}><Camera size={14} /> Save frame</button
               >
-              <label class="ml-auto inline-flex items-center gap-2 text-xs text-muted"
-                >Zoom <input
-                  type="range"
-                  min="2"
-                  max="200"
-                  bind:value={pps}
-                  class="w-28 accent-accent"
-                /></label
-              >
+              <div class="ml-auto">
+                <Slider
+                  label="Zoom"
+                  compact
+                  value={pps}
+                  min={2}
+                  max={200}
+                  onChange={(v) => (pps = v)}
+                />
+              </div>
             </div>
             {#if drawingRedaction}<p class="text-xs text-muted">
                 Drag over the preview. The area is covered for 3 seconds from the playhead; change
@@ -859,425 +1043,281 @@
             class="w-80 shrink-0 space-y-5 overflow-y-auto border-l border-line bg-raised p-4 text-sm"
           >
             {#if project}
-              {#if selectedMain}
-                <section class="space-y-2">
-                  <h3 class="font-medium">
-                    Clip · {session.assets.get(selectedMain.assetId)?.name}
-                  </h3>
-                  <div class="grid grid-cols-2 gap-2">
-                    <label class="grid gap-1 text-xs text-muted"
-                      >Start in source (s)<input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        class={field}
-                        value={selectedMain.in.toFixed(2)}
-                        onchange={(e) =>
-                          patchMain('Trim', {
-                            in: Math.max(0, Math.min(num(e), selectedMain.out - 0.05)),
-                          })}
-                      /></label
-                    >
-                    <label class="grid gap-1 text-xs text-muted"
-                      >End in source (s)<input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        class={field}
-                        value={selectedMain.out.toFixed(2)}
-                        onchange={(e) => {
+              {#key selected}
+                {#if selectedMain}
+                  <Section
+                    id="clip"
+                    title="Clip"
+                    detail={session.assets.get(selectedMain.assetId)?.name}
+                  >
+                    <div class="grid grid-cols-2 gap-2">
+                      <NumberField
+                        label="Start in source"
+                        time
+                        step={0.01}
+                        min={0}
+                        value={selectedMain.in}
+                        onChange={(v) =>
+                          patchMain('Trim', { in: Math.min(v, selectedMain.out - 0.05) })}
+                      />
+                      <NumberField
+                        label="End in source"
+                        time
+                        step={0.01}
+                        min={0}
+                        value={selectedMain.out}
+                        onChange={(v) => {
                           const asset = session.assets.get(selectedMain.assetId);
                           const max = asset?.kind === 'image' ? 3600 : (asset?.duration ?? 0);
                           patchMain('Trim', {
-                            out: Math.min(max, Math.max(num(e), selectedMain.in + 0.05)),
+                            out: Math.min(max, Math.max(v, selectedMain.in + 0.05)),
                           });
                         }}
-                      /></label
-                    >
-                  </div>
-                  <label class="grid gap-1 text-xs">
-                    Speed
-                    <select
-                      class={field}
+                      />
+                    </div>
+                    <Slider
+                      label="Speed"
                       value={selectedMain.speed}
-                      onchange={(e) => patchMain('Speed', { speed: num(e) })}
-                    >
-                      {#each [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4] as s (s)}<option value={s}
-                          >{s}×</option
-                        >{/each}
-                    </select>
-                  </label>
-                  <label class="grid gap-1 text-xs">
-                    <span class="flex justify-between"
-                      >Volume <span class="text-muted">{db(selectedMain.volume)} dB</span></span
-                    >
-                    <input
-                      type="range"
-                      min="-30"
-                      max="12"
-                      step="0.5"
-                      value={Number(db(selectedMain.volume))}
-                      class="accent-accent"
-                      oninput={(e) => patchMain('Volume', { volume: 10 ** (num(e) / 20) })}
+                      min={0.25}
+                      max={4}
+                      step={0.05}
+                      defaultValue={1}
+                      unit="×"
+                      marks={SPEED_MARKS}
+                      onChange={(speed) => patchMain('Speed', { speed })}
                     />
-                  </label>
-                  <label class="flex items-center gap-2 text-xs"
-                    ><input
-                      type="checkbox"
-                      checked={selectedMain.muted}
-                      onchange={(e) =>
-                        patchMain('Mute', { muted: (e.currentTarget as HTMLInputElement).checked })}
-                    /> Mute this clip's sound</label
-                  >
-                  <div class="grid grid-cols-3 gap-2">
-                    <label class="grid gap-1 text-xs text-muted"
-                      >Fade in<input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        class={field}
-                        value={selectedMain.fadeIn}
-                        onchange={(e) => patchMain('Fade in', { fadeIn: Math.max(0, num(e)) })}
-                      /></label
-                    >
-                    <label class="grid gap-1 text-xs text-muted"
-                      >Fade out<input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        class={field}
-                        value={selectedMain.fadeOut}
-                        onchange={(e) => patchMain('Fade out', { fadeOut: Math.max(0, num(e)) })}
-                      /></label
-                    >
-                  </div>
-                  <div class="flex gap-1.5">
-                    <button
-                      type="button"
-                      class="icon-button border border-line"
-                      aria-label="Rotate left"
-                      onclick={() =>
-                        patchMain('Rotate', {
-                          transform: {
-                            ...selectedMain.transform,
-                            rotate: ((selectedMain.transform.rotate + 270) %
-                              360) as MainClip['transform']['rotate'],
-                          },
-                        })}><RotateCcw size={15} /></button
-                    >
-                    <button
-                      type="button"
-                      class="icon-button border border-line"
-                      aria-label="Rotate right"
-                      onclick={() =>
-                        patchMain('Rotate', {
-                          transform: {
-                            ...selectedMain.transform,
-                            rotate: ((selectedMain.transform.rotate + 90) %
-                              360) as MainClip['transform']['rotate'],
-                          },
-                        })}><RotateCw size={15} /></button
-                    >
-                    <button
-                      type="button"
-                      class="icon-button border border-line"
-                      aria-label="Flip horizontally"
-                      onclick={() =>
-                        patchMain('Flip', {
-                          transform: {
-                            ...selectedMain.transform,
-                            flipH: !selectedMain.transform.flipH,
-                          },
-                        })}><FlipHorizontal2 size={15} /></button
-                    >
-                    <button
-                      type="button"
-                      class="icon-button border border-line"
-                      aria-label="Flip vertically"
-                      onclick={() =>
-                        patchMain('Flip', {
-                          transform: {
-                            ...selectedMain.transform,
-                            flipV: !selectedMain.transform.flipV,
-                          },
-                        })}><FlipVertical2 size={15} /></button
-                    >
-                  </div>
-                  <div class="space-y-1.5">
-                    <p class="text-xs">
-                      Crop
-                      <span class="text-muted"
-                        >· {selectedMain.transform.crop
-                          ? `${Math.round(selectedMain.transform.crop.width * 100)}% × ${Math.round(selectedMain.transform.crop.height * 100)}%`
-                          : 'none'}</span
-                      >
-                    </p>
-                    <div class="flex flex-wrap gap-1.5">
+                    {@render volume(
+                      'Volume',
+                      selectedMain.volume,
+                      -30,
+                      12,
+                      (volume) => patchMain('Volume', { volume }),
+                      "Mute this clip's sound",
+                      selectedMain.muted,
+                      (muted) => patchMain('Mute', { muted }),
+                    )}
+                    {@render fades(
+                      selectedMain.fadeIn,
+                      selectedMain.fadeOut,
+                      mainLength(selectedMain),
+                      (fadeIn) => patchMain('Fade in', { fadeIn }),
+                      (fadeOut) => patchMain('Fade out', { fadeOut }),
+                    )}
+                    <div class="flex gap-1.5">
                       <button
                         type="button"
-                        class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs {cropping ===
-                        selectedMain.id
-                          ? 'border-accent bg-accent-soft text-accent'
-                          : 'border-line hover:border-accent hover:text-accent'}"
-                        aria-pressed={cropping === selectedMain.id}
+                        class="icon-button border border-line"
+                        aria-label="Rotate left"
                         onclick={() =>
-                          (cropping = cropping === selectedMain.id ? null : selectedMain.id)}
-                        ><CropIcon size={12} />
-                        {cropping === selectedMain.id ? 'Done' : 'Crop on the preview'}</button
+                          patchMain('Rotate', {
+                            transform: {
+                              ...selectedMain.transform,
+                              rotate: ((selectedMain.transform.rotate + 270) %
+                                360) as MainClip['transform']['rotate'],
+                            },
+                          })}><RotateCcw size={15} /></button
                       >
                       <button
                         type="button"
-                        class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2.5 py-1 text-xs"
-                        title="Crop to the project shape, so the clip fills the frame"
-                        onclick={() => setCrop(selectedMain, fillCrop(selectedMain))}
-                        >Fill the frame</button
+                        class="icon-button border border-line"
+                        aria-label="Rotate right"
+                        onclick={() =>
+                          patchMain('Rotate', {
+                            transform: {
+                              ...selectedMain.transform,
+                              rotate: ((selectedMain.transform.rotate + 90) %
+                                360) as MainClip['transform']['rotate'],
+                            },
+                          })}><RotateCw size={15} /></button
                       >
                       <button
                         type="button"
-                        class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2.5 py-1 text-xs disabled:opacity-40"
-                        disabled={!selectedMain.transform.crop}
-                        onclick={() => setCrop(selectedMain, null)}>Remove crop</button
+                        class="icon-button border border-line"
+                        aria-label="Flip horizontally"
+                        onclick={() =>
+                          patchMain('Flip', {
+                            transform: {
+                              ...selectedMain.transform,
+                              flipH: !selectedMain.transform.flipH,
+                            },
+                          })}><FlipHorizontal2 size={15} /></button
+                      >
+                      <button
+                        type="button"
+                        class="icon-button border border-line"
+                        aria-label="Flip vertically"
+                        onclick={() =>
+                          patchMain('Flip', {
+                            transform: {
+                              ...selectedMain.transform,
+                              flipV: !selectedMain.transform.flipV,
+                            },
+                          })}><FlipVertical2 size={15} /></button
                       >
                     </div>
-                  </div>
-                </section>
-                <ChromaKeyFields
-                  value={selectedMain.key}
-                  onChange={(label, key) =>
-                    apply(label, updateMain(project, selectedMain.id, { key }))}
-                />
-              {:else if selectedOverlay}
-                <section class="space-y-2">
-                  <h3 class="inline-flex items-center gap-1.5 font-medium">
-                    <ImageIcon size={14} /> Overlay
-                  </h3>
-                  <div class="grid grid-cols-2 gap-2">
-                    <label class="grid gap-1 text-xs text-muted"
-                      >Starts at (s)<input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        class={field}
-                        value={selectedOverlay.start.toFixed(1)}
-                        onchange={(e) =>
-                          apply(
-                            'Overlay',
-                            updateOverlay(project, selectedOverlay.id, {
-                              start: Math.max(0, num(e)),
-                            }),
-                          )}
-                      /></label
-                    >
-                    <label class="grid gap-1 text-xs text-muted"
-                      >Lasts (s)<input
-                        type="number"
-                        step="0.1"
-                        min="0.1"
-                        class={field}
-                        value={(selectedOverlay.out - selectedOverlay.in).toFixed(1)}
-                        onchange={(e) =>
-                          apply(
-                            'Overlay',
-                            updateOverlay(project, selectedOverlay.id, {
-                              out: selectedOverlay.in + Math.max(0.1, num(e)),
-                            }),
-                          )}
-                      /></label
-                    >
-                  </div>
-                  <label class="grid gap-1 text-xs">
-                    <span class="flex justify-between"
-                      >Volume <span class="text-muted">{db(selectedOverlay.volume)} dB</span></span
-                    >
-                    <input
-                      type="range"
-                      min="-30"
-                      max="12"
-                      step="0.5"
-                      value={Number(db(selectedOverlay.volume))}
-                      class="accent-accent"
-                      oninput={(e) =>
-                        apply(
-                          'Volume',
-                          updateOverlay(project, selectedOverlay.id, {
-                            volume: 10 ** (num(e) / 20),
-                          }),
-                        )}
+                    <div class="space-y-1.5">
+                      <p class="text-xs">
+                        Crop
+                        <span class="text-muted"
+                          >· {selectedMain.transform.crop
+                            ? `${Math.round(selectedMain.transform.crop.width * 100)}% × ${Math.round(selectedMain.transform.crop.height * 100)}%`
+                            : 'none'}</span
+                        >
+                      </p>
+                      <div class="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs {cropping ===
+                          selectedMain.id
+                            ? 'border-accent bg-accent-soft text-accent'
+                            : 'border-line hover:border-accent hover:text-accent'}"
+                          aria-pressed={cropping === selectedMain.id}
+                          onclick={() =>
+                            (cropping = cropping === selectedMain.id ? null : selectedMain.id)}
+                          ><CropIcon size={12} />
+                          {cropping === selectedMain.id ? 'Done' : 'Crop on the preview'}</button
+                        >
+                        <button
+                          type="button"
+                          class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2.5 py-1 text-xs"
+                          title="Crop to the project shape, so the clip fills the frame"
+                          onclick={() => setCrop(selectedMain, fillCrop(selectedMain))}
+                          >Fill the frame</button
+                        >
+                        <button
+                          type="button"
+                          class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-2.5 py-1 text-xs disabled:opacity-40"
+                          disabled={!selectedMain.transform.crop}
+                          onclick={() => setCrop(selectedMain, null)}>Remove crop</button
+                        >
+                      </div>
+                    </div>
+                    <ChromaKeyFields
+                      value={selectedMain.key}
+                      {picking}
+                      onPick={startPicking}
+                      onChange={(label, key) =>
+                        apply(label, updateMain(project, selectedMain.id, { key }))}
                     />
-                  </label>
-                  <label class="flex items-center gap-2 text-xs"
-                    ><input
-                      type="checkbox"
-                      checked={selectedOverlay.muted}
-                      onchange={(e) =>
-                        apply(
-                          'Mute',
-                          updateOverlay(project, selectedOverlay.id, {
-                            muted: (e.currentTarget as HTMLInputElement).checked,
-                          }),
-                        )}
-                    /> Mute this overlay's sound</label
-                  >
-                  <label class="grid gap-1 text-xs"
-                    >Opacity<input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={selectedOverlay.opacity}
-                      class="accent-accent"
-                      oninput={(e) =>
-                        apply(
-                          'Opacity',
-                          updateOverlay(project, selectedOverlay.id, { opacity: num(e) }),
-                        )}
-                    /></label
-                  >
-                </section>
-                <ChromaKeyFields
-                  value={selectedOverlay.key}
-                  onChange={(label, key) =>
-                    apply(label, updateOverlay(project, selectedOverlay.id, { key }))}
-                />
-              {:else if selectedMusic}
-                <section class="space-y-2">
-                  <h3 class="inline-flex items-center gap-1.5 font-medium">
-                    <Music size={14} /> Music
-                  </h3>
-                  <label class="grid gap-1 text-xs text-muted"
-                    >Starts at (s)<input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      class={field}
-                      value={selectedMusic.start.toFixed(1)}
-                      onchange={(e) =>
-                        apply(
-                          'Music',
-                          updateMusic(project, selectedMusic.id, { start: Math.max(0, num(e)) }),
-                        )}
-                    /></label
-                  >
-                  <label class="grid gap-1 text-xs">
-                    <span class="flex justify-between"
-                      >Volume <span class="text-muted">{db(selectedMusic.volume)} dB</span></span
-                    >
-                    <input
-                      type="range"
-                      min="-40"
-                      max="6"
-                      step="0.5"
-                      value={Number(db(selectedMusic.volume))}
-                      class="accent-accent"
-                      oninput={(e) =>
-                        apply(
-                          'Music volume',
-                          updateMusic(project, selectedMusic.id, { volume: 10 ** (num(e) / 20) }),
-                        )}
+                  </Section>
+                {:else if selectedOverlay}
+                  {@const patch = (label: string, change: Partial<OverlayClip>) =>
+                    apply(label, updateOverlay(project, selectedOverlay.id, change))}
+                  <Section id="overlay" title="Overlay" icon={ImageIcon}>
+                    <div class="grid grid-cols-2 gap-2">
+                      <NumberField
+                        label="Starts at"
+                        time
+                        min={0}
+                        value={selectedOverlay.start}
+                        onChange={(start) => patch('Overlay', { start })}
+                      />
+                      <NumberField
+                        label="Lasts"
+                        time
+                        min={0.1}
+                        value={selectedOverlay.out - selectedOverlay.in}
+                        onChange={(length) =>
+                          patch('Overlay', { out: selectedOverlay.in + length })}
+                      />
+                    </div>
+                    {@render volume(
+                      'Volume',
+                      selectedOverlay.volume,
+                      -30,
+                      12,
+                      (volume) => patch('Volume', { volume }),
+                      "Mute this overlay's sound",
+                      selectedOverlay.muted,
+                      (muted) => patch('Mute', { muted }),
+                    )}
+                    <Slider
+                      label="Opacity"
+                      value={selectedOverlay.opacity * 100}
+                      min={0}
+                      max={100}
+                      step={5}
+                      defaultValue={100}
+                      unit="%"
+                      onChange={(v) => patch('Opacity', { opacity: v / 100 })}
                     />
-                  </label>
-                  <label class="flex items-center gap-2 text-xs"
-                    ><input
-                      type="checkbox"
+                    <ChromaKeyFields
+                      value={selectedOverlay.key}
+                      {picking}
+                      onPick={startPicking}
+                      onChange={(label, key) => patch(label, { key })}
+                    />
+                  </Section>
+                {:else if selectedMusic}
+                  {@const patch = (label: string, change: Partial<MusicClip>) =>
+                    apply(label, updateMusic(project, selectedMusic.id, change))}
+                  <Section id="music" title="Music" icon={Music}>
+                    <NumberField
+                      label="Starts at"
+                      time
+                      min={0}
+                      value={selectedMusic.start}
+                      onChange={(start) => patch('Music', { start })}
+                    />
+                    {@render volume('Volume', selectedMusic.volume, -40, 6, (volume) =>
+                      patch('Music volume', { volume }),
+                    )}
+                    <Switch
+                      label="Lower the music while clips have sound"
                       checked={selectedMusic.duck}
-                      onchange={(e) =>
-                        apply(
-                          'Ducking',
-                          updateMusic(project, selectedMusic.id, {
-                            duck: (e.currentTarget as HTMLInputElement).checked,
-                          }),
-                        )}
-                    /> Lower the music while clips have sound</label
-                  >
-                  <div class="grid grid-cols-2 gap-2">
-                    <label class="grid gap-1 text-xs text-muted"
-                      >Fade in (s)<input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        class={field}
-                        value={selectedMusic.fadeIn}
-                        onchange={(e) =>
-                          apply(
-                            'Music fade',
-                            updateMusic(project, selectedMusic.id, { fadeIn: Math.max(0, num(e)) }),
-                          )}
-                      /></label
-                    >
-                    <label class="grid gap-1 text-xs text-muted"
-                      >Fade out (s)<input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        class={field}
-                        value={selectedMusic.fadeOut}
-                        onchange={(e) =>
-                          apply(
-                            'Music fade',
-                            updateMusic(project, selectedMusic.id, {
-                              fadeOut: Math.max(0, num(e)),
-                            }),
-                          )}
-                      /></label
-                    >
-                  </div>
-                </section>
-              {:else if selectedText}
-                <TextPanel
-                  clip={selectedText}
-                  fonts={project.fonts}
-                  onChange={(label, patch) =>
-                    apply(label, updateText(project, selectedText.id, patch))}
-                  onAddFont={addFont}
-                />
-              {:else if selectedRedaction}
-                <section class="space-y-2">
-                  <h3 class="font-medium">Covered area</h3>
-                  <div class="grid grid-cols-2 gap-2">
-                    <label class="grid gap-1 text-xs text-muted"
-                      >From (s)<input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        class={field}
-                        value={selectedRedaction.from.toFixed(1)}
-                        onchange={(e) => patchRedaction({ from: Math.max(0, num(e)) })}
-                      /></label
-                    >
-                    <label class="grid gap-1 text-xs text-muted"
-                      >To (s)<input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        class={field}
-                        value={selectedRedaction.to.toFixed(1)}
-                        onchange={(e) =>
-                          patchRedaction({ to: Math.max(selectedRedaction.from + 0.1, num(e)) })}
-                      /></label
-                    >
-                  </div>
-                  <select
-                    class={field}
-                    value={selectedRedaction.kind}
-                    onchange={(e) =>
-                      patchRedaction({
-                        kind: (e.currentTarget as HTMLSelectElement)
-                          .value as TimedRedaction['kind'],
-                      })}
-                  >
-                    <option value="fill">Solid box (redact)</option>
-                    <option value="pixelate">Pixelate (cosmetic)</option>
-                    <option value="blur">Blur (cosmetic)</option>
-                  </select>
-                  {#if selectedRedaction.kind !== 'fill'}
-                    <p class="rounded-xl bg-sunken px-3 py-2 text-xs text-warning">
-                      Blur and pixelation can be partly reversed, more easily in video than in a
-                      photo, because many frames add up. Use a solid box for anything that must stay
-                      secret.
-                    </p>
-                  {/if}
-                </section>
-              {/if}
+                      onChange={(duck) => patch('Ducking', { duck })}
+                    />
+                    {@render fades(
+                      selectedMusic.fadeIn,
+                      selectedMusic.fadeOut,
+                      selectedMusic.out - selectedMusic.in,
+                      (fadeIn) => patch('Music fade', { fadeIn }),
+                      (fadeOut) => patch('Music fade', { fadeOut }),
+                    )}
+                  </Section>
+                {:else if selectedText}
+                  <TextPanel
+                    clip={selectedText}
+                    fonts={project.fonts}
+                    onChange={(label, patch) =>
+                      apply(label, updateText(project, selectedText.id, patch))}
+                    onAddFont={addFont}
+                  />
+                {:else if selectedRedaction}
+                  <Section id="redaction" title="Covered area">
+                    <div class="grid grid-cols-2 gap-2">
+                      <NumberField
+                        label="From"
+                        time
+                        min={0}
+                        value={selectedRedaction.from}
+                        onChange={(from) => patchRedaction({ from })}
+                      />
+                      <NumberField
+                        label="To"
+                        time
+                        min={0}
+                        value={selectedRedaction.to}
+                        onChange={(to) =>
+                          patchRedaction({ to: Math.max(selectedRedaction.from + 0.1, to) })}
+                      />
+                    </div>
+                    <Segmented
+                      label="Cover with"
+                      options={REDACTION_KINDS}
+                      value={selectedRedaction.kind}
+                      onChange={(kind) => patchRedaction({ kind })}
+                    />
+                    {#if selectedRedaction.kind !== 'fill'}
+                      <p class="rounded-xl bg-sunken px-3 py-2 text-xs text-warning">
+                        Blur and pixelation can be partly reversed, more easily in video than in a
+                        photo, because many frames add up. Use a solid box for anything that must
+                        stay secret.
+                      </p>
+                    {/if}
+                  </Section>
+                {/if}
+              {/key}
 
               <CaptionsPanel
                 bind:this={captionsPanel}
@@ -1292,98 +1332,63 @@
                 onAddFont={addFont}
               />
 
-              <section class="space-y-2">
-                <h3 class="font-medium">Project</h3>
+              <Section id="project" title="Project">
                 <OverallVolume
                   gain={project.gain ?? 1}
                   onChange={(gain) => apply('Overall volume', { ...project, gain })}
                 />
-                <label class="grid gap-1 text-xs">
-                  Shape
-                  <select
-                    class={field}
-                    onchange={(e) => setAspect((e.currentTarget as HTMLSelectElement).value)}
-                  >
-                    <option value="">{project.width}×{project.height}</option>
-                    <option value="source">Same as the first clip</option>
-                    {#each Object.keys(ASPECTS) as key (key)}<option value={key}>{key}</option
-                      >{/each}
-                  </select>
-                </label>
-                <label class="grid gap-1 text-xs">
-                  Clips that don't match the shape
-                  <select
-                    class={field}
-                    value={project.fit}
-                    onchange={(e) =>
-                      apply('Fit', {
-                        ...project,
-                        fit: (e.currentTarget as HTMLSelectElement).value as VideoProject['fit'],
-                      })}
-                  >
-                    <option value="contain">Fit inside, with bars</option>
-                    <option value="cover">Fill, cropping the edges</option>
-                  </select>
-                </label>
-                <label class="grid gap-1 text-xs">
-                  Frame rate
-                  <select
-                    class={field}
-                    value={project.fps}
-                    onchange={(e) => apply('Frame rate', { ...project, fps: num(e) })}
-                  >
-                    {#each [...new Set( [project.fps, 24, 25, 30, 50, 60] )].sort((a, b) => a - b) as f (f)}<option
-                        value={f}>{f} fps</option
-                      >{/each}
-                  </select>
-                </label>
-              </section>
+                <Segmented
+                  label="Shape"
+                  options={[
+                    { value: 'source', label: 'Source', disabled: !sourceSize },
+                    ...Object.keys(ASPECTS).map((key) => ({ value: key, label: key })),
+                  ]}
+                  value={shape}
+                  onChange={setAspect}
+                  option={shapeTile}
+                />
+                <Segmented
+                  label="Clips that don't match the shape"
+                  options={FITS}
+                  value={project.fit}
+                  onChange={(fit) => apply('Fit', { ...project, fit })}
+                />
+                <Segmented
+                  label="Frame rate (fps)"
+                  options={[...new Set([project.fps, 24, 25, 30, 50, 60])]
+                    .sort((a, b) => a - b)
+                    .map((fps) => ({ value: fps, label: String(fps) }))}
+                  value={project.fps}
+                  onChange={(fps) => apply('Frame rate', { ...project, fps })}
+                />
+              </Section>
 
-              <section class="space-y-2">
-                <h3 class="font-medium">Export</h3>
-                <select class={field} bind:value={exportFormat} aria-label="Export format">
-                  <option value="mp4">MP4 (H.264)</option>
-                  <option value="webm">WebM (VP9)</option>
-                </select>
+              <Section id="export" title="Export" collapsible={false}>
+                <Segmented
+                  label="Export format"
+                  options={EXPORT_FORMATS}
+                  value={exportFormat}
+                  onChange={(format) => (exportFormat = format)}
+                />
                 {#if copyable}
-                  <label class="flex items-start gap-2 text-xs"
-                    ><input type="checkbox" class="mt-0.5" bind:checked={preferCopy} />
-                    <span
-                      >Fast export without re-encoding
-                      <span class="block text-muted"
-                        >No quality loss. Cuts move to the nearest key frame, and the original
-                        format is kept.</span
-                      ></span
-                    ></label
-                  >
+                  <Segmented
+                    label="Export method"
+                    options={EXPORT_METHODS}
+                    value={preferCopy ? 'fast' : 'exact'}
+                    hint={preferCopy
+                      ? 'No quality loss. Cuts move to the nearest key frame, and the original format is kept.'
+                      : 'Re-encoded, so cuts land on the exact frame.'}
+                    onChange={(method) => (preferCopy = method === 'fast')}
+                  />
                 {/if}
                 {#if !fastCopy}
-                  <label class="grid gap-1 text-xs">
-                    <span class="flex justify-between"
-                      ><span>Smaller file</span><span>Better quality</span></span
-                    >
-                    <input
-                      type="range"
-                      min="1"
-                      max="100"
-                      bind:value={exportQuality}
-                      class="accent-accent"
-                      aria-label="Quality"
-                    />
-                  </label>
-                  <label class="flex items-center gap-2 text-xs"
-                    >Fit to <input
-                      type="number"
-                      min="0.1"
-                      step="any"
-                      placeholder="Off"
-                      class="w-20 rounded-lg border border-line bg-surface px-2 py-1"
-                      value={exportMb ?? ''}
-                      onchange={(e) =>
-                        (exportMb = (e.currentTarget as HTMLInputElement).value ? num(e) : null)}
-                    /> MB</label
-                  >
-                  {#if estimate}<p class="text-xs text-muted">About {formatBytes(estimate)}</p>{/if}
+                  <QualityPicker
+                    quality={exportQuality}
+                    targetMb={exportMb}
+                    {estimate}
+                    onChange={(q) => (exportQuality = q)}
+                    onTargetMb={(mb) => (exportMb = mb)}
+                  />
                 {/if}
                 {#if exporting}
                   <p class="inline-flex items-center gap-2 text-muted">
@@ -1399,15 +1404,13 @@
                     onclick={runExport}>Export</button
                   >
                 {/if}
-                {#if !exporting}<label class="flex items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      class="accent-accent"
-                      checked={files.autoDownload}
-                      onchange={(e) => files.setAutoDownload(e.currentTarget.checked)}
-                    />
-                    Download when it's done
-                  </label>{/if}
+                {#if !exporting}
+                  <Switch
+                    label="Download when it's done"
+                    checked={files.autoDownload}
+                    onChange={(on) => files.setAutoDownload(on)}
+                  />
+                {/if}
                 {#if exportError}<p class="text-danger">{exportError}</p>{/if}
                 {#if exported}
                   <div class="space-y-1 rounded-xl bg-sunken p-3">
@@ -1424,7 +1427,7 @@
                     >
                   </div>
                 {/if}
-              </section>
+              </Section>
             {/if}
           </aside>
         </div>

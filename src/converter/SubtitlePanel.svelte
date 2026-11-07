@@ -2,6 +2,7 @@
   import { Captions, ChevronRight, Download, LoaderCircle, X } from '@lucide/svelte';
   import { Collapsible } from 'bits-ui';
   import { formatBytes } from '../app/format';
+  import Select from '../app/ui/Select.svelte';
   import { hub } from '../engine';
   import { downloadBlob } from '../io/download';
   import { subtitleAdder as adder } from './subtitles.svelte';
@@ -13,7 +14,6 @@
   const progress = $derived(
     job.status === 'running' && job.taskId ? (hub.latest.get(job.taskId) ?? 0) : 0,
   );
-  const field = 'rounded-xl border border-line bg-surface px-3 py-2';
 </script>
 
 <Collapsible.Root bind:open>
@@ -24,32 +24,22 @@
     <span class="truncate text-muted">· as a track viewers can turn on, without re-encoding</span>
   </Collapsible.Trigger>
   <Collapsible.Content class="grid gap-4 px-5 pb-5 text-sm">
-    <label class="grid gap-1.5">
-      <span class="font-medium">Video</span>
-      <select
-        class={field}
-        value={adder.videoId ?? videos[0]?.id}
-        onchange={(e) => (adder.videoId = e.currentTarget.value)}
-      >
-        {#each videos as video (video.id)}<option value={video.id}>{video.file.name}</option>{/each}
-      </select>
-    </label>
-    <label class="grid gap-1.5">
-      <span class="font-medium">Subtitles</span>
-      <select
-        class={field}
-        value={adder.subtitleId ?? subtitles[0]?.id}
-        onchange={(e) => (adder.subtitleId = e.currentTarget.value)}
-      >
-        {#each subtitles as file (file.id)}<option value={file.id}>{file.file.name}</option>{/each}
-      </select>
-    </label>
-    <label class="grid gap-1.5">
-      <span class="font-medium"
-        >Language <span class="font-normal text-muted">(optional)</span></span
-      >
+    <Select
+      label="Video"
+      options={videos.map((v) => ({ value: v.id, label: v.file.name }))}
+      value={adder.videoId ?? videos[0]?.id ?? ''}
+      onChange={(id) => (adder.videoId = id)}
+    />
+    <Select
+      label="Subtitles"
+      options={subtitles.map((f) => ({ value: f.id, label: f.file.name }))}
+      value={adder.subtitleId ?? subtitles[0]?.id ?? ''}
+      onChange={(id) => (adder.subtitleId = id)}
+    />
+    <label class="grid gap-1">
+      <span class="text-xs text-muted">Language (optional)</span>
       <input
-        class={field}
+        class="h-8 rounded-lg border border-line bg-surface px-2 text-sm"
         maxlength="3"
         placeholder="eng"
         aria-describedby="subtitle-language-hint"

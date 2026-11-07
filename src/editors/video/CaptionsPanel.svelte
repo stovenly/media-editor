@@ -10,7 +10,11 @@
   import { inspectPool, scheduler } from '../../engine';
   import { messageOf } from '../../engine/errors';
   import { downloadBlob } from '../../io/download';
-  import type { Captions, ProjectFont } from '../../project/text';
+  import NumberField from '../../app/ui/NumberField.svelte';
+  import Section from '../../app/ui/Section.svelte';
+  import Segmented from '../../app/ui/Segmented.svelte';
+  import Switch from '../../app/ui/Switch.svelte';
+  import { CAPTION_STYLE, type Captions, type ProjectFont } from '../../project/text';
   import TextStyleFields from './TextStyleFields.svelte';
 
   let {
@@ -41,7 +45,6 @@
   let saveAs = $state<SubtitleFormat>('srt');
 
   const cue = $derived(captions.cues.find((c) => c.id === selected) ?? null);
-  const num = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
   const time = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 
   function setCues(label: string, cues: Cue[]) {
@@ -87,18 +90,22 @@
     downloadBlob(new Blob([text], { type: `${mime};charset=utf-8` }), `${name}.${saveAs}`);
   }
 
+  const FORMATS: { value: SubtitleFormat; label: string }[] = [
+    { value: 'srt', label: 'SRT' },
+    { value: 'vtt', label: 'WebVTT' },
+    { value: 'ass', label: 'ASS' },
+  ];
   const field = 'w-full min-w-0 rounded-lg border border-line bg-surface px-2 py-1 text-sm';
   const pill =
     'inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-xs hover:border-accent disabled:opacity-40';
 </script>
 
-<section class="space-y-2" aria-labelledby="captions-heading">
-  <h3 id="captions-heading" class="inline-flex items-center gap-1.5 font-medium">
-    <CaptionsIcon size={14} /> Captions
-    {#if captions.cues.length}<span class="font-normal text-muted">· {captions.cues.length}</span
-      >{/if}
-  </h3>
-
+<Section
+  id="captions"
+  title="Captions"
+  icon={CaptionsIcon}
+  detail={captions.cues.length ? String(captions.cues.length) : undefined}
+>
   {#if cue}
     <div class="space-y-2 rounded-xl border border-accent/40 p-2">
       <textarea
@@ -107,30 +114,23 @@
         value={cue.text}
         oninput={(e) => patchCue('Caption text', { text: e.currentTarget.value })}></textarea>
       <div class="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-        <label class="grid gap-1 text-xs text-muted"
-          >From (s)<input
-            type="number"
-            step="0.05"
-            min="0"
-            class={field}
-            value={cue.start.toFixed(2)}
-            onchange={(e) =>
-              patchCue('Caption timing', {
-                start: Math.max(0, Math.min(num(e), cue.end - 0.05)),
-              })}
-          /></label
-        >
-        <label class="grid gap-1 text-xs text-muted"
-          >To (s)<input
-            type="number"
-            step="0.05"
-            min="0"
-            class={field}
-            value={cue.end.toFixed(2)}
-            onchange={(e) =>
-              patchCue('Caption timing', { end: Math.max(cue.start + 0.05, num(e)) })}
-          /></label
-        >
+        <NumberField
+          label="From"
+          time
+          step={0.05}
+          min={0}
+          value={cue.start}
+          onChange={(start) =>
+            patchCue('Caption timing', { start: Math.min(start, cue.end - 0.05) })}
+        />
+        <NumberField
+          label="To"
+          time
+          step={0.05}
+          min={0}
+          value={cue.end}
+          onChange={(end) => patchCue('Caption timing', { end: Math.max(cue.start + 0.05, end) })}
+        />
         <button
           type="button"
           class="icon-button border border-line"
@@ -192,9 +192,15 @@
     </ul>
 
     <div class="flex items-end gap-1.5">
-      <label class="grid flex-1 gap-1 text-xs text-muted"
-        >Move all by (s)<input type="number" step="0.1" class={field} bind:value={nudge} /></label
-      >
+      <div class="min-w-0 flex-1">
+        <NumberField
+          label="Move all by"
+          unit="s"
+          step={0.1}
+          value={nudge}
+          onChange={(v) => (nudge = v)}
+        />
+      </div>
       <button
         type="button"
         class={pill}
@@ -209,20 +215,16 @@
       >
     </div>
 
-    <label class="flex items-center gap-2 text-xs"
-      ><input
-        type="checkbox"
-        checked={captions.burn}
-        onchange={(e) => onChange('Burn in captions', { burn: e.currentTarget.checked })}
-      /> Draw them into the picture</label
-    >
-    <label class="flex items-center gap-2 text-xs"
-      ><input
-        type="checkbox"
-        checked={captions.track}
-        onchange={(e) => onChange('Subtitle track', { track: e.currentTarget.checked })}
-      /> Also add a subtitle track viewers can switch on</label
-    >
+    <Switch
+      label="Draw them into the picture"
+      checked={captions.burn}
+      onChange={(burn) => onChange('Burn in captions', { burn })}
+    />
+    <Switch
+      label="Also add a subtitle track viewers can switch on"
+      checked={captions.track}
+      onChange={(track) => onChange('Subtitle track', { track })}
+    />
     {#if captions.track}
       <label class="flex items-center gap-2 text-xs text-muted"
         >Language <input
@@ -236,26 +238,30 @@
       >
     {/if}
 
-    <details class="rounded-xl border border-line px-2 py-1.5">
-      <summary class="cursor-pointer text-xs font-medium">Caption style</summary>
-      <div class="pt-2">
+    <div class="rounded-xl border border-line px-2 py-1.5">
+      <Section id="caption-style" title="Caption style" level={4} defaultOpen={false}>
         <TextStyleFields
           style={captions.style}
+          defaults={CAPTION_STYLE}
           {fonts}
           onChange={(label, style) => onChange(`Caption ${label.toLowerCase()}`, { style })}
           {onAddFont}
         />
-      </div>
-    </details>
+      </Section>
+    </div>
 
     <div class="flex items-center gap-1.5">
-      <select class="{field} w-auto" bind:value={saveAs} aria-label="Caption file format">
-        <option value="srt">SRT</option>
-        <option value="vtt">WebVTT</option>
-        <option value="ass">ASS</option>
-      </select>
+      <div class="min-w-0 flex-1">
+        <Segmented
+          label="Caption file format"
+          hideLabel
+          options={FORMATS}
+          value={saveAs}
+          onChange={(format) => (saveAs = format)}
+        />
+      </div>
       <button type="button" class={pill} onclick={save}><Download size={12} /> Save captions</button
       >
     </div>
   {/if}
-</section>
+</Section>

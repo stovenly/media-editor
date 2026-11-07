@@ -1,27 +1,52 @@
+<script lang="ts" module>
+  import { BUNDLED_FONTS } from '../../engine/video/fonts';
+
+  // The worker draws with its own copies; these let the font list show each face.
+  let previewed = false;
+  function previewFonts() {
+    if (previewed || typeof FontFace === 'undefined') return;
+    previewed = true;
+    for (const font of BUNDLED_FONTS)
+      for (const face of font.faces)
+        document.fonts.add(
+          new FontFace(font.family, `url(${face.url})`, { style: face.style, weight: face.weight }),
+        );
+  }
+</script>
+
 <script lang="ts">
   import { Bold, Italic } from '@lucide/svelte';
-  import { BUNDLED_FONTS, FONT_EXTENSIONS } from '../../engine/video/fonts';
+  import ColourField from '../../app/ui/ColourField.svelte';
+  import IconToggle from '../../app/ui/IconToggle.svelte';
+  import SectionToggle from '../../app/ui/SectionToggle.svelte';
+  import Select from '../../app/ui/Select.svelte';
+  import Slider from '../../app/ui/Slider.svelte';
+  import Switch from '../../app/ui/Switch.svelte';
+  import { FONT_EXTENSIONS } from '../../engine/video/fonts';
   import { ANCHORS, type Anchor, type ProjectFont, type TextStyle } from '../../project/text';
 
   let {
     style,
+    defaults,
     fonts,
     placement = true,
     onChange,
     onAddFont,
   }: {
     style: TextStyle;
+    defaults: TextStyle;
     placement?: boolean;
     fonts: readonly ProjectFont[];
     onChange: (label: string, style: TextStyle) => void;
     onAddFont: (file: File) => Promise<string | null>;
   } = $props();
 
+  previewFonts();
+
   let picker = $state<HTMLInputElement>();
   let fontError = $state<string | null>(null);
 
   const set = (label: string, patch: Partial<TextStyle>) => onChange(label, { ...style, ...patch });
-  const num = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
 
   const ANCHOR_LABELS: Record<Anchor, string> = {
     'top-left': 'Top left',
@@ -35,12 +60,26 @@
     'bottom-right': 'Bottom right',
   };
 
-  const boxColour = $derived(style.box?.slice(0, 7) ?? '#000000');
-  const boxOpacity = $derived(style.box ? parseInt(style.box.slice(7, 9) || 'ff', 16) / 255 : 0.7);
-  const hexAlpha = (a: number) =>
-    Math.round(Math.min(1, Math.max(0, a)) * 255)
-      .toString(16)
-      .padStart(2, '0');
+  const ADD_FONT = '+';
+  const fontOptions = $derived([
+    ...BUNDLED_FONTS.map((f) => ({
+      value: f.family,
+      label: f.label,
+      style: `font-family: '${f.family}'`,
+    })),
+    ...fonts.map((f) => ({ value: f.family, label: f.family })),
+    { value: ADD_FONT, label: 'Use a font file…' },
+  ]);
+
+  const OUTLINE_ON = 0.06;
+  const BOX_ON = '#000000b3';
+
+  let lastOutline = $state(0);
+  let lastBox = $state<string | null>(null);
+  $effect.pre(() => {
+    if (style.outline > 0) lastOutline = style.outline;
+    if (style.box) lastBox = style.box;
+  });
 
   async function pickFont(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
@@ -55,47 +94,30 @@
       fontError = error instanceof Error ? error.message : String(error);
     }
   }
-
-  const field = 'w-full min-w-0 rounded-lg border border-line bg-surface px-2 py-1 text-sm';
-  const toggle = (on: boolean) =>
-    `icon-button border ${on ? 'border-accent bg-accent-soft text-accent' : 'border-line'}`;
 </script>
 
 <div class="space-y-2">
   <div class="flex items-end gap-1.5">
-    <label class="grid min-w-0 flex-1 gap-1 text-xs">
-      Font
-      <select
-        class={field}
+    <div class="min-w-0 flex-1">
+      <Select
+        label="Font"
+        options={fontOptions}
         value={style.font}
-        onchange={(e) => {
-          const value = e.currentTarget.value;
-          if (value === '+') {
-            e.currentTarget.value = style.font;
-            picker?.click();
-          } else set('Font', { font: value });
-        }}
-      >
-        {#each BUNDLED_FONTS as font (font.family)}<option value={font.family}>{font.label}</option
-          >{/each}
-        {#each fonts as font (font.id)}<option value={font.family}>{font.family}</option>{/each}
-        <option value="+">Use a font file…</option>
-      </select>
-    </label>
-    <button
-      type="button"
-      class={toggle(style.bold)}
-      aria-label="Bold"
-      aria-pressed={style.bold}
-      onclick={() => set('Bold', { bold: !style.bold })}><Bold size={15} /></button
-    >
-    <button
-      type="button"
-      class={toggle(style.italic)}
-      aria-label="Italic"
-      aria-pressed={style.italic}
-      onclick={() => set('Italic', { italic: !style.italic })}><Italic size={15} /></button
-    >
+        onChange={(font) => (font === ADD_FONT ? picker?.click() : set('Font', { font }))}
+      />
+    </div>
+    <IconToggle
+      label="Bold"
+      icon={Bold}
+      pressed={style.bold}
+      onChange={(bold) => set('Bold', { bold })}
+    />
+    <IconToggle
+      label="Italic"
+      icon={Italic}
+      pressed={style.italic}
+      onChange={(italic) => set('Italic', { italic })}
+    />
   </div>
   <input
     bind:this={picker}
@@ -107,91 +129,61 @@
   />
   {#if fontError}<p class="text-xs text-danger">{fontError}</p>{/if}
 
-  <div class="grid grid-cols-[1fr_auto] items-end gap-2">
-    <label class="grid gap-1 text-xs"
-      ><span class="flex justify-between"
-        >Size <span class="text-muted">{Math.round(style.size * 100)}% of height</span></span
-      ><input
-        type="range"
-        min="0.02"
-        max="0.25"
-        step="0.005"
-        value={style.size}
-        class="accent-accent"
-        oninput={(e) => set('Text size', { size: num(e) })}
-      /></label
-    >
-    <label class="grid gap-1 text-xs"
-      >Colour<input
-        type="color"
-        value={style.color}
-        class="h-7 w-10 rounded border border-line bg-surface"
-        oninput={(e) => set('Text colour', { color: e.currentTarget.value })}
-      /></label
-    >
-  </div>
+  <Slider
+    label="Size (% of height)"
+    value={style.size * 100}
+    min={2}
+    max={25}
+    step={0.5}
+    defaultValue={defaults.size * 100}
+    unit="%"
+    onChange={(v) => set('Text size', { size: v / 100 })}
+  />
+  <ColourField
+    label="Text colour"
+    value={style.color}
+    onChange={(color) => set('Text colour', { color })}
+  />
 
-  <div class="grid grid-cols-[1fr_auto] items-end gap-2">
-    <label class="grid gap-1 text-xs"
-      >Outline<input
-        type="range"
-        min="0"
-        max="0.15"
-        step="0.005"
-        value={style.outline}
-        class="accent-accent"
-        oninput={(e) => set('Outline', { outline: num(e) })}
-      /></label
-    >
-    <input
-      type="color"
-      value={style.outlineColor}
-      class="h-7 w-10 rounded border border-line bg-surface"
-      aria-label="Outline colour"
-      oninput={(e) => set('Outline colour', { outlineColor: e.currentTarget.value })}
-    />
-  </div>
-
-  <label class="flex items-center gap-2 text-xs"
-    ><input
-      type="checkbox"
-      checked={style.shadow}
-      onchange={(e) => set('Shadow', { shadow: e.currentTarget.checked })}
-    /> Shadow</label
+  <SectionToggle
+    label="Outline"
+    checked={style.outline > 0}
+    onChange={(on) =>
+      set('Outline', { outline: on ? lastOutline || defaults.outline || OUTLINE_ON : 0 })}
   >
+    <Slider
+      label="Width (% of text size)"
+      value={style.outline * 100}
+      min={0.5}
+      max={15}
+      step={0.5}
+      defaultValue={(defaults.outline || OUTLINE_ON) * 100}
+      unit="%"
+      onChange={(v) => set('Outline', { outline: v / 100 })}
+    />
+    <ColourField
+      label="Outline colour"
+      value={style.outlineColor}
+      onChange={(outlineColor) => set('Outline colour', { outlineColor })}
+    />
+  </SectionToggle>
 
-  <div class="flex items-center gap-2 text-xs">
-    <label class="flex items-center gap-2"
-      ><input
-        type="checkbox"
-        checked={style.box !== null}
-        onchange={(e) =>
-          set('Background', {
-            box: e.currentTarget.checked ? `${boxColour}${hexAlpha(boxOpacity)}` : null,
-          })}
-      /> Background</label
-    >
+  <Switch label="Shadow" checked={style.shadow} onChange={(shadow) => set('Shadow', { shadow })} />
+
+  <SectionToggle
+    label="Background"
+    checked={style.box !== null}
+    onChange={(on) => set('Background', { box: on ? (lastBox ?? defaults.box ?? BOX_ON) : null })}
+  >
     {#if style.box}
-      <input
-        type="color"
-        value={boxColour}
-        class="h-6 w-8 rounded border border-line bg-surface"
-        aria-label="Background colour"
-        oninput={(e) =>
-          set('Background', { box: `${e.currentTarget.value}${hexAlpha(boxOpacity)}` })}
-      />
-      <input
-        type="range"
-        min="0.1"
-        max="1"
-        step="0.05"
-        value={boxOpacity}
-        class="min-w-0 flex-1 accent-accent"
-        aria-label="Background opacity"
-        oninput={(e) => set('Background', { box: `${boxColour}${hexAlpha(num(e))}` })}
+      <ColourField
+        label="Background colour"
+        alpha
+        value={style.box}
+        onChange={(box) => set('Background', { box })}
       />
     {/if}
-  </div>
+  </SectionToggle>
 
   {#if placement}
     <fieldset class="space-y-1">
@@ -209,16 +201,15 @@
         {/each}
       </div>
     </fieldset>
-    <label class="grid gap-1 text-xs"
-      >Distance from the edge<input
-        type="range"
-        min="0"
-        max="0.25"
-        step="0.005"
-        value={style.margin}
-        class="accent-accent"
-        oninput={(e) => set('Margin', { margin: num(e) })}
-      /></label
-    >
+    <Slider
+      label="Distance from the edge"
+      value={style.margin * 100}
+      min={0}
+      max={25}
+      step={0.5}
+      defaultValue={defaults.margin * 100}
+      unit="%"
+      onChange={(v) => set('Margin', { margin: v / 100 })}
+    />
   {/if}
 </div>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Archive, LoaderCircle } from '@lucide/svelte';
   import { formatBytes } from '../app/format';
+  import Switch from '../app/ui/Switch.svelte';
   import VirtualList from '../app/ui/VirtualList.svelte';
   import { scheduler, zipPool } from '../engine';
   import { editing } from '../editors/editing.svelte';
@@ -215,15 +216,11 @@
             {/if}
           </div>
         {/if}
-        <label class="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            class="accent-accent"
-            checked={files.autoDownload}
-            onchange={(e) => files.setAutoDownload(e.currentTarget.checked)}
-          />
-          Download each file when it's done
-        </label>
+        <Switch
+          label="Download each file when it's done"
+          checked={files.autoDownload}
+          onChange={(on) => files.setAutoDownload(on)}
+        />
         <button
           type="button"
           class="inline-flex w-full items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 font-medium text-on-accent shadow-sm transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"

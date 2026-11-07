@@ -36,7 +36,7 @@ test('crops a clip to fill a different frame shape', async ({ page, browserName 
   await expect(page.getByRole('application', { name: /Video timeline/ })).toBeVisible({
     timeout: 30_000,
   });
-  await page.getByRole('combobox', { name: 'Shape', exact: true }).selectOption('1:1');
+  await page.getByRole('radio', { name: '1:1', exact: true }).click();
   const save = async () => {
     const [file] = await Promise.all([
       page.waitForEvent('download'),

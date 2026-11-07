@@ -98,7 +98,7 @@ test('cuts on key frames export by copying', async ({ page, browserName }) => {
   await drag(page, at(1.6), at(1.2));
   await expect(clock).toHaveText(/\/ 0:01\.60$/);
 
-  await expect(page.getByLabel(/Fast export without re-encoding/)).toBeChecked();
+  await expect(page.getByRole('radio', { name: 'Fast', exact: true })).toBeChecked();
   const path = await exported(page);
   await expect(
     page.getByText('Copied without re-encoding, so there is no quality loss'),
@@ -118,7 +118,7 @@ test('a trim between key frames is re-encoded to land exactly', async ({ page, b
   await drag(page, { x: at(0).x + 1, y: at(0).y }, at(1));
   await expect(clock).toHaveText(/\/ 0:02\.00$/);
 
-  await expect(page.getByLabel(/Fast export without re-encoding/)).toBeChecked();
+  await expect(page.getByRole('radio', { name: 'Fast', exact: true })).toBeChecked();
   const path = await exported(page);
   await expect(page.getByText(/Re-encoded so the cuts land exactly/)).toBeVisible();
   expect(Number(probe(path).format.duration)).toBeCloseTo(1, 1);

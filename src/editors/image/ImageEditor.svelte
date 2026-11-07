@@ -1,19 +1,30 @@
 <script lang="ts">
   import {
     Crop,
+    Droplets,
     FlipHorizontal2,
     FlipVertical2,
+    Grid3x3,
+    Link2,
+    Link2Off,
     LoaderCircle,
     Redo2,
     RotateCcw,
     RotateCw,
     Scaling,
     SlidersHorizontal,
+    Square,
     SquareDashed,
     Trash2,
     Undo2,
   } from '@lucide/svelte';
   import { Dialog } from 'bits-ui';
+  import ColourField, { provideProjectColours } from '../../app/ui/ColourField.svelte';
+  import IconToggle from '../../app/ui/IconToggle.svelte';
+  import LinkedPair from '../../app/ui/LinkedPair.svelte';
+  import NumberField from '../../app/ui/NumberField.svelte';
+  import Segmented, { type SegmentedOption } from '../../app/ui/Segmented.svelte';
+  import Slider from '../../app/ui/Slider.svelte';
   import { files, type FileItem } from '../../converter/files.svelte';
   import { History } from '../../project/history.svelte';
   import {
@@ -70,6 +81,17 @@
     { key: 'temperature', label: 'Temperature', min: -100, max: 100, step: 1 },
     { key: 'tint', label: 'Tint', min: -100, max: 100, step: 1 },
   ];
+  const REDACTION_KINDS: SegmentedOption<Redaction['kind']>[] = [
+    { value: 'fill', label: 'Box', icon: Square, tooltip: 'Solid box (redact)' },
+    { value: 'blur', label: 'Blur', icon: Droplets, tooltip: 'Blur (cosmetic)' },
+    { value: 'pixelate', label: 'Pixelate', icon: Grid3x3, tooltip: 'Pixelate (cosmetic)' },
+  ];
+  const SIDES = [
+    ['top', 'Top'],
+    ['right', 'Right'],
+    ['bottom', 'Bottom'],
+    ['left', 'Left'],
+  ] as const;
 
   // svelte-ignore state_referenced_locally
   const session = new EditorSession(item.file, item.inspection!);
@@ -83,7 +105,16 @@
   let selected = $state<string | null>(null);
   let redactKind = $state<Redaction['kind']>('fill');
   let redactColor = $state('#000000');
+  provideProjectColours(() => [
+    redactColor,
+    ...edit.redactions.map((r) => r.color),
+    ...(edit.pad ? [edit.pad.color] : []),
+  ]);
   let lockRatio = $state(true);
+  const evenPad = (pad: ImageEdit['pad']) =>
+    !pad || (pad.top === pad.right && pad.top === pad.bottom && pad.top === pad.left);
+  // svelte-ignore state_referenced_locally
+  let padLinked = $state(evenPad(edit.pad));
   let applyToAll = $state(false);
 
   const images = $derived(
@@ -158,19 +189,28 @@
     selected = null;
   }
 
-  function setResize(width: number | null, height: number | null) {
+  function setResize(w: number, h: number) {
     if (!cropped) return;
-    const ratio = cropped.width / cropped.height;
-    let w = width ?? edit.resize?.width ?? cropped.width;
-    let h = height ?? edit.resize?.height ?? cropped.height;
-    if (lockRatio && width !== null) h = Math.round(w / ratio);
-    if (lockRatio && height !== null) w = Math.round(h * ratio);
     set('Resize', {
       resize:
         w === cropped.width && h === cropped.height
           ? null
           : { width: Math.max(1, w), height: Math.max(1, h) },
     });
+  }
+
+  function resizeToPercent(percent: number) {
+    if (!cropped) return;
+    const w = Math.round((cropped.width * percent) / 100);
+    const h = lockRatio
+      ? Math.round((w * cropped.height) / cropped.width)
+      : (edit.resize?.height ?? cropped.height);
+    setResize(w, h);
+  }
+
+  function linkPad(linked: boolean) {
+    padLinked = linked;
+    if (linked && !evenPad(edit.pad)) setPad('all', edit.pad!.top);
   }
 
   function setPad(side: 'top' | 'right' | 'bottom' | 'left' | 'all', value: number) {
@@ -200,7 +240,12 @@
 
   function keydown(event: KeyboardEvent) {
     const mod = event.ctrlKey || event.metaKey;
-    if ((event.target as HTMLElement).closest('input, select, textarea')) return;
+    if (
+      (event.target as HTMLElement).closest(
+        'input, select, textarea, [role=slider], [role=radio], [role=switch], [role=combobox], [role=listbox]',
+      )
+    )
+      return;
     if (mod && event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) history.redo();
@@ -216,8 +261,6 @@
       removeRedaction(selected);
     }
   }
-
-  const number = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
 </script>
 
 <svelte:window onkeydown={keydown} />
@@ -328,9 +371,7 @@
           {/if}
         </div>
 
-        <aside
-          class="flex w-80 shrink-0 flex-col border-l border-line bg-raised"
-        >
+        <aside class="flex w-80 shrink-0 flex-col border-l border-line bg-raised">
           <div class="flex border-b border-line" role="tablist">
             {#each TABS as t (t.id)}
               <button
@@ -367,16 +408,13 @@
               {#if rotated}
                 <section class="grid grid-cols-2 gap-2">
                   {#each [['x', 'Left', rotated.width], ['y', 'Top', rotated.height], ['width', 'Width', rotated.width], ['height', 'Height', rotated.height]] as const as [field, label, scale] (field)}
-                    <label class="grid gap-1 text-xs text-muted">
-                      {label} (px)
-                      <input
-                        type="number"
-                        min="0"
-                        class="w-full min-w-0 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-fg"
-                        value={Math.round(crop[field] * scale)}
-                        onchange={(e) => setCropPixels(field, number(e))}
-                      />
-                    </label>
+                    <NumberField
+                      {label}
+                      value={Math.round(crop[field] * scale)}
+                      min={0}
+                      unit="px"
+                      onChange={(v) => setCropPixels(field, v)}
+                    />
                   {/each}
                 </section>
               {/if}
@@ -412,42 +450,30 @@
                     ><FlipVertical2 size={16} /></button
                   >
                 </div>
-                <label class="grid gap-1">
-                  <span class="flex justify-between text-xs text-muted"
-                    >Straighten <span class="tabular-nums">{edit.angle.toFixed(1)}°</span></span
-                  >
-                  <input
-                    type="range"
-                    min="-45"
-                    max="45"
-                    step="0.1"
-                    value={edit.angle}
-                    class="accent-accent"
-                    oninput={(e) => set('Straighten', { angle: number(e), crop: null })}
-                  />
-                </label>
+                <Slider
+                  label="Straighten"
+                  value={edit.angle}
+                  min={-45}
+                  max={45}
+                  step={0.1}
+                  defaultValue={0}
+                  unit="°"
+                  signed
+                  onChange={(angle) => set('Straighten', { angle, crop: null })}
+                />
               </section>
             {:else if tab === 'adjust'}
               {#each SLIDERS as s (s.key)}
-                <label class="grid gap-1">
-                  <span class="flex justify-between text-xs">
-                    <span>{s.label}</span>
-                    <span class="text-muted tabular-nums"
-                      >{edit.adjust[s.key] > 0 ? '+' : ''}{edit.adjust[s.key]}</span
-                    >
-                  </span>
-                  <input
-                    type="range"
-                    min={s.min}
-                    max={s.max}
-                    step={s.step}
-                    value={edit.adjust[s.key]}
-                    class="accent-accent"
-                    ondblclick={() => set(s.label, { adjust: { ...edit.adjust, [s.key]: 0 } })}
-                    oninput={(e) =>
-                      set(s.label, { adjust: { ...edit.adjust, [s.key]: number(e) } })}
-                  />
-                </label>
+                <Slider
+                  label={s.label}
+                  value={edit.adjust[s.key]}
+                  min={s.min}
+                  max={s.max}
+                  step={s.step}
+                  defaultValue={0}
+                  signed
+                  onChange={(v) => set(s.label, { adjust: { ...edit.adjust, [s.key]: v } })}
+                />
               {/each}
               <button
                 type="button"
@@ -457,42 +483,19 @@
               >
             {:else if tab === 'redact'}
               <p class="text-muted">Drag over the picture to cover an area.</p>
-              <div class="grid gap-1.5">
-                <label class="flex items-center gap-2"
-                  ><input
-                    type="radio"
-                    name="kind"
-                    checked={redactKind === 'fill'}
-                    onchange={() => (redactKind = 'fill')}
-                  /> Redact with a solid box</label
-                >
-                {#if redactKind === 'fill'}
-                  <label class="ml-6 inline-flex items-center gap-2 text-xs text-muted"
-                    >Colour <input
-                      type="color"
-                      bind:value={redactColor}
-                      class="size-6 rounded border border-line"
-                    /></label
-                  >
-                {/if}
-                <label class="flex items-center gap-2"
-                  ><input
-                    type="radio"
-                    name="kind"
-                    checked={redactKind === 'pixelate'}
-                    onchange={() => (redactKind = 'pixelate')}
-                  /> Obscure: pixelate</label
-                >
-                <label class="flex items-center gap-2"
-                  ><input
-                    type="radio"
-                    name="kind"
-                    checked={redactKind === 'blur'}
-                    onchange={() => (redactKind = 'blur')}
-                  /> Obscure: blur</label
-                >
-              </div>
-              {#if redactKind !== 'fill'}
+              <Segmented
+                label="Cover with"
+                options={REDACTION_KINDS}
+                value={redactKind}
+                onChange={(kind) => (redactKind = kind)}
+              />
+              {#if redactKind === 'fill'}
+                <ColourField
+                  label="Box colour"
+                  value={redactColor}
+                  onChange={(c) => (redactColor = c)}
+                />
+              {:else}
                 <p class="rounded-xl bg-sunken px-3 py-2 text-xs text-warning">
                   Blur and pixelation are cosmetic. They can be partly reversed, so don't use them
                   to hide text, faces or numbers that must stay secret.
@@ -533,77 +536,69 @@
             {:else if tab === 'size' && cropped}
               <section class="space-y-2">
                 <h3 class="font-medium">Resize</h3>
-                <div class="grid grid-cols-2 gap-2">
-                  <label class="grid gap-1 text-xs text-muted"
-                    >Width (px)<input
-                      type="number"
-                      min="1"
-                      class="w-full min-w-0 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-fg"
-                      value={edit.resize?.width ?? cropped.width}
-                      onchange={(e) => setResize(number(e), null)}
-                    /></label
-                  >
-                  <label class="grid gap-1 text-xs text-muted"
-                    >Height (px)<input
-                      type="number"
-                      min="1"
-                      class="w-full min-w-0 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-fg"
-                      value={edit.resize?.height ?? cropped.height}
-                      onchange={(e) => setResize(null, number(e))}
-                    /></label
-                  >
-                </div>
-                <label class="flex items-center gap-2 text-xs"
-                  ><input type="checkbox" bind:checked={lockRatio} /> Keep proportions</label
-                >
+                <LinkedPair
+                  label="Resize"
+                  labels={['Width', 'Height']}
+                  values={[
+                    edit.resize?.width ?? cropped.width,
+                    edit.resize?.height ?? cropped.height,
+                  ]}
+                  ratio={cropped.width / cropped.height}
+                  linked={lockRatio}
+                  min={1}
+                  unit="px"
+                  onChange={([w, h]) => setResize(w, h)}
+                  onLinkedChange={(linked) => (lockRatio = linked)}
+                />
                 <div class="flex flex-wrap gap-1.5">
                   {#each [25, 50, 75, 100] as percent (percent)}
                     <button
                       type="button"
                       class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1 text-xs"
-                      onclick={() => setResize(Math.round((cropped.width * percent) / 100), null)}
-                      >{percent}%</button
+                      onclick={() => resizeToPercent(percent)}>{percent}%</button
                     >
                   {/each}
                 </div>
               </section>
               <section class="space-y-2">
                 <h3 class="font-medium">Border</h3>
-                <label class="grid gap-1 text-xs text-muted"
-                  >All sides (px)<input
-                    type="number"
-                    min="0"
-                    class="w-full min-w-0 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-fg"
-                    value={edit.pad?.top ?? 0}
-                    onchange={(e) => setPad('all', number(e))}
-                  /></label
-                >
-                <div class="grid grid-cols-4 gap-2">
-                  {#each ['top', 'right', 'bottom', 'left'] as const as side (side)}
-                    <label class="grid gap-1 text-xs text-muted capitalize"
-                      >{side}<input
-                        type="number"
-                        min="0"
-                        class="w-full min-w-0 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-fg"
-                        value={edit.pad?.[side] ?? 0}
-                        onchange={(e) => setPad(side, number(e))}
-                      /></label
-                    >
-                  {/each}
-                </div>
-                <label class="inline-flex items-center gap-2 text-xs text-muted">
-                  Colour
-                  <input
-                    type="color"
-                    value={edit.pad?.color ?? '#ffffff'}
-                    class="size-6 rounded border border-line"
-                    onchange={(e) =>
-                      edit.pad &&
-                      set('Border colour', {
-                        pad: { ...edit.pad, color: (e.currentTarget as HTMLInputElement).value },
-                      })}
+                <div class="flex items-end gap-2">
+                  <div class="grid min-w-0 flex-1 grid-cols-2 gap-2">
+                    {#if padLinked}
+                      <NumberField
+                        label="All sides"
+                        value={edit.pad?.top ?? 0}
+                        min={0}
+                        unit="px"
+                        onChange={(v) => setPad('all', v)}
+                      />
+                    {:else}
+                      {#each SIDES as [side, label] (side)}
+                        <NumberField
+                          {label}
+                          value={edit.pad?.[side] ?? 0}
+                          min={0}
+                          unit="px"
+                          onChange={(v) => setPad(side, v)}
+                        />
+                      {/each}
+                    {/if}
+                  </div>
+                  <IconToggle
+                    label="Same on every side"
+                    pressed={padLinked}
+                    icon={Link2Off}
+                    pressedIcon={Link2}
+                    onChange={linkPad}
                   />
-                </label>
+                </div>
+                <ColourField
+                  label="Border colour"
+                  value={edit.pad?.color ?? '#ffffff'}
+                  disabled={!edit.pad}
+                  onChange={(color) =>
+                    edit.pad && set('Border colour', { pad: { ...edit.pad, color } })}
+                />
               </section>
             {/if}
           </div>

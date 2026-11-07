@@ -17,8 +17,8 @@ test('drags the edge of a text clip to make it longer', async ({ page, browserNa
   const timeline = page.getByRole('application', { name: /Video timeline/ });
   await expect(timeline).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: /^Text$/ }).click();
-  const lasts = page.getByRole('spinbutton', { name: 'Lasts (s)' });
-  await expect(lasts).toHaveValue('3.0');
+  const lasts = page.getByRole('spinbutton', { name: 'Lasts', exact: true });
+  await expect(lasts).toHaveValue('0:03.00');
 
   // Timeline layout: 100 px of labels, 30 px per second, new text sits on the top layer, centred at 44 px.
   await timeline.scrollIntoViewIfNeeded();
@@ -28,14 +28,16 @@ test('drags the edge of a text clip to make it longer', async ({ page, browserNa
   await page.mouse.down();
   await page.mouse.move(box.x + 100 + 180, y, { steps: 5 });
   await page.mouse.up();
-  await expect(lasts).toHaveValue('6.0');
+  await expect(lasts).toHaveValue('0:06.00');
 
   await page.mouse.move(box.x + 100, y);
   await page.mouse.down();
   await page.mouse.move(box.x + 100 + 60, y, { steps: 5 });
   await page.mouse.up();
-  await expect(lasts).toHaveValue('4.0');
-  await expect(page.getByRole('spinbutton', { name: 'Starts at (s)' })).toHaveValue('2.0');
+  await expect(lasts).toHaveValue('0:04.00');
+  await expect(page.getByRole('spinbutton', { name: 'Starts at', exact: true })).toHaveValue(
+    '0:02.00',
+  );
 });
 
 test('snaps a dragged edge to the edge of another item', async ({ page, browserName }) => {
@@ -50,8 +52,8 @@ test('snaps a dragged edge to the edge of another item', async ({ page, browserN
   const timeline = page.getByRole('application', { name: /Video timeline/ });
   await expect(timeline).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: /^Text$/ }).click();
-  const lasts = page.getByRole('spinbutton', { name: 'Lasts (s)' });
-  await expect(lasts).toHaveValue('3.0');
+  const lasts = page.getByRole('spinbutton', { name: 'Lasts', exact: true });
+  await expect(lasts).toHaveValue('0:03.00');
 
   // The video clip ends at 2 s (124 px); letting go 4 px past it lands exactly on it.
   await timeline.scrollIntoViewIfNeeded();
@@ -61,5 +63,5 @@ test('snaps a dragged edge to the edge of another item', async ({ page, browserN
   await page.mouse.down();
   await page.mouse.move(box.x + 100 + 64, y, { steps: 5 });
   await page.mouse.up();
-  await expect(lasts).toHaveValue('2.0');
+  await expect(lasts).toHaveValue('0:02.00');
 });

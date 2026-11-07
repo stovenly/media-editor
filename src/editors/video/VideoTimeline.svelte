@@ -1,5 +1,6 @@
 <script lang="ts">
   import { theme } from '../../app/theme.svelte';
+  import { labelOn, themeColours } from '../shared/theme-colours';
   import { Eye, Music } from '@lucide/svelte';
   import {
     laneCount,
@@ -131,15 +132,13 @@
   const palette = $derived.by(() => {
     void theme.choice;
     void scheme;
-    const css = getComputedStyle(document.documentElement);
-    const v = (n: string) => css.getPropertyValue(n).trim();
-    return {
-      text: v('--text'),
-      muted: v('--text-muted'),
-      border: v('--border'),
-      accent: v('--accent'),
-      danger: v('--danger'),
-    };
+    return themeColours({
+      text: '--text',
+      muted: '--text-muted',
+      border: '--border',
+      accent: '--accent',
+      danger: '--danger',
+    });
   });
 
   type Grab = 'move' | 'start' | 'end';
@@ -261,17 +260,6 @@
     g.closePath();
     g.fill();
     g.restore();
-  }
-
-  // Black or white, whichever reads better on a #rrggbb fill.
-  function labelOn(fill: string): string {
-    const hex = /^#([0-9a-f]{6})$/i.exec(fill.trim())?.[1];
-    if (!hex) return '#ffffff';
-    const [r, g, b] = [0, 2, 4].map((i) => {
-      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
-      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    }) as [number, number, number];
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.18 ? '#000000' : '#ffffff';
   }
 
   function locate(event: PointerEvent) {

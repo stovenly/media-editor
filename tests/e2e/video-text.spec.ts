@@ -97,8 +97,9 @@ for (const container of ['MP4', 'WebM'] as const) {
     );
 
     await page
-      .getByRole('combobox', { name: 'Export format' })
-      .selectOption(container === 'MP4' ? 'mp4' : 'webm');
+      .getByRole('group', { name: 'Export format' })
+      .getByRole('radio', { name: container === 'MP4' ? 'MP4' : 'WebM', exact: true })
+      .click();
     await page.getByRole('button', { name: 'Export', exact: true }).click();
     const exported = await download(page, page.getByRole('button', { name: /^Download / }));
     const plain = frameAt(join(FIXTURES, 'clip.mp4'), 0.5);

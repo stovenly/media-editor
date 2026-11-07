@@ -102,9 +102,21 @@ test('resizes an animated GIF and keeps it animated', async ({ page }) => {
     'true',
   );
   await expect(page.getByText('Only the first frame will be kept')).toHaveCount(0);
-  await expect(page.getByRole('slider', { name: 'Quality' })).toBeVisible();
-  await page.getByRole('combobox', { name: 'Image size' }).selectOption('custom');
-  const width = page.getByRole('spinbutton', { name: 'Image size in pixels' });
+  await expect(page.getByRole('radio', { name: /^Original quality/ })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await page
+    .getByRole('group', { name: 'Quality', exact: true })
+    .getByRole('radio', { name: 'Custom' })
+    .click();
+  await expect(page.getByRole('slider', { name: 'Quality level' })).toBeVisible();
+  await page
+    .getByRole('group', { name: 'Image size', exact: true })
+    .first()
+    .getByRole('radio', { name: 'Custom' })
+    .click();
+  const width = page.getByRole('spinbutton', { name: 'Longest side' });
   await width.fill('32');
   await width.blur();
   await page.getByRole('button', { name: 'Convert', exact: true }).click();

@@ -2,6 +2,9 @@
   import { ChevronRight, Download, Layers, LoaderCircle, X } from '@lucide/svelte';
   import { Collapsible } from 'bits-ui';
   import { formatBytes } from '../app/format';
+  import NumberField from '../app/ui/NumberField.svelte';
+  import Segmented, { type SegmentedOption } from '../app/ui/Segmented.svelte';
+  import Select, { type SelectOption } from '../app/ui/Select.svelte';
   import { hub } from '../engine';
   import { target } from '../engine/targets';
   import { downloadBlob } from '../io/download';
@@ -16,6 +19,27 @@
   );
   const video = $derived(target(combine.target).group === 'video');
   const coverOnly = $derived(video && images.length === 1 && combine.audioId !== null);
+
+  const SHORT: Record<CombineTarget, string> = {
+    mp4: 'MP4',
+    webm: 'WebM',
+    'gif-anim': 'GIF',
+    'webp-anim': 'WebP',
+    apng: 'APNG',
+  };
+  const makeOptions = $derived<SegmentedOption<CombineTarget>[]>(
+    COMBINE_TARGETS.filter((id) => images.length > 1 || target(id).group === 'video').map((id) => ({
+      value: id,
+      label: SHORT[id],
+      tooltip: target(id).group === 'video' ? `${target(id).label} video` : target(id).label,
+    })),
+  );
+  // File ids all start with "file-", so this can't collide with one.
+  const NO_SOUND = 'none';
+  const soundOptions = $derived<SelectOption<string>[]>([
+    { value: NO_SOUND, label: 'None' },
+    ...audios.map((audio) => ({ value: audio.id, label: audio.file.name })),
+  ]);
 
   const summary = $derived(
     images.length === 1
@@ -38,51 +62,29 @@
     <span class="truncate text-muted">· {summary}</span>
   </Collapsible.Trigger>
   <Collapsible.Content class="grid gap-4 px-5 pb-5 text-sm">
-    <label class="grid gap-1.5">
-      <span class="font-medium">Make</span>
-      <select
-        class="rounded-xl border border-line bg-surface px-3 py-2"
-        value={combine.target}
-        onchange={(e) => (combine.target = e.currentTarget.value as CombineTarget)}
-      >
-        {#each COMBINE_TARGETS as id (id)}
-          {#if images.length > 1 || target(id).group === 'video'}
-            <option value={id}
-              >{target(id).group === 'video'
-                ? `${target(id).label} video`
-                : target(id).label}</option
-            >
-          {/if}
-        {/each}
-      </select>
-    </label>
+    <Segmented
+      label="Make"
+      options={makeOptions}
+      value={combine.target}
+      onChange={(id) => (combine.target = id)}
+    />
     {#if !coverOnly}
-      <label class="grid gap-1.5">
-        <span class="font-medium">Seconds per image</span>
-        <input
-          type="number"
-          min="0.05"
-          step="0.05"
-          class="rounded-xl border border-line bg-surface px-3 py-2"
-          value={combine.seconds}
-          onchange={(e) => (combine.seconds = Math.max(0.05, Number(e.currentTarget.value) || 1))}
-        />
-      </label>
+      <NumberField
+        label="Seconds per image"
+        value={combine.seconds}
+        min={0.05}
+        step={0.05}
+        unit="s"
+        onChange={(seconds) => (combine.seconds = seconds)}
+      />
     {/if}
     {#if video && audios.length}
-      <label class="grid gap-1.5">
-        <span class="font-medium">Sound</span>
-        <select
-          class="rounded-xl border border-line bg-surface px-3 py-2"
-          value={combine.audioId ?? ''}
-          onchange={(e) => (combine.audioId = e.currentTarget.value || null)}
-        >
-          <option value="">None</option>
-          {#each audios as audio (audio.id)}
-            <option value={audio.id}>{audio.file.name}</option>
-          {/each}
-        </select>
-      </label>
+      <Select
+        label="Sound"
+        options={soundOptions}
+        value={combine.audioId ?? NO_SOUND}
+        onChange={(id) => (combine.audioId = id === NO_SOUND ? null : id)}
+      />
     {/if}
     <div class="flex flex-wrap items-center gap-3">
       <p class="flex-1 text-muted">

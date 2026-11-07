@@ -11,9 +11,19 @@
     Square,
     Trash2,
     Undo2,
+    Volume2,
+    VolumeX,
   } from '@lucide/svelte';
   import { Dialog } from 'bits-ui';
   import { formatBytes } from '../../app/format';
+  import IconToggle from '../../app/ui/IconToggle.svelte';
+  import NumberField from '../../app/ui/NumberField.svelte';
+  import QualityPicker from '../../app/ui/QualityPicker.svelte';
+  import Section from '../../app/ui/Section.svelte';
+  import Segmented, { type SegmentedOption } from '../../app/ui/Segmented.svelte';
+  import Select, { type SelectOption } from '../../app/ui/Select.svelte';
+  import Slider from '../../app/ui/Slider.svelte';
+  import Switch from '../../app/ui/Switch.svelte';
   import { files, type FileItem } from '../../converter/files.svelte';
   import { wakeLock } from '../../converter/wake-lock.svelte';
   import { hub } from '../../engine';
@@ -53,7 +63,32 @@
   let { item, restore, onClose }: { item: FileItem; restore?: Restore; onClose: () => void } =
     $props();
 
-  const AUDIO_TARGETS = TARGETS.filter((t) => t.group === 'audio');
+  const COMMON_FORMATS = ['mp3', 'm4a', 'wav', 'flac'];
+  const EXPORT_FORMATS: SelectOption<string>[] = TARGETS.filter((t) => t.group === 'audio')
+    .sort((a, b) => rank(a.id) - rank(b.id))
+    .map((t) => ({ value: t.id, label: t.label }));
+  function rank(id: string) {
+    const index = COMMON_FORMATS.indexOf(id);
+    return index < 0 ? COMMON_FORMATS.length : index;
+  }
+  const NORMALISE_MODES: SegmentedOption<AudioProject['normalize']['mode']>[] = [
+    { value: 'off', label: 'Off' },
+    { value: 'peak', label: 'Peak', tooltip: 'Loudest peak at −1 dB' },
+    { value: 'lufs', label: 'Loudness' },
+  ];
+  const LOUDNESS_TARGETS: SegmentedOption<number>[] = [
+    { value: -14, label: 'Streaming' },
+    { value: -16, label: 'Podcast' },
+    { value: -23, label: 'Broadcast' },
+  ];
+  const CHANNEL_OPS: SelectOption<AudioProject['channelOp']>[] = [
+    { value: 'none', label: 'As recorded' },
+    { value: 'mono', label: 'Mix to mono' },
+    { value: 'swap', label: 'Swap left and right' },
+    { value: 'left', label: 'Left channel only' },
+    { value: 'right', label: 'Right channel only' },
+  ];
+  const SAMPLE_RATES = [96000, 48000, 44100, 32000, 22050];
   const session = new AudioSession();
   const history = new History<AudioProject | null>(null);
   const project = $derived(history.state);
@@ -65,7 +100,7 @@
   let silenceSeconds = $state(1);
 
   let exportTarget = $state('mp3');
-  let exportQuality = $state(82);
+  let exportQuality = $state(100);
   let exportMb = $state<number | null>(null);
   let exporting = $state<{ jobId: string | null; stage: string } | null>(null);
   let exported = $state<{ blob: Blob; name: string; notes: string[] } | null>(null);
@@ -122,6 +157,11 @@
   $effect(() => () => session.close());
 
   const duration = $derived(project ? projectDuration(project) : 0);
+  const sampleRates = $derived<SelectOption<string>[]>(
+    [...new Set([...SAMPLE_RATES, project?.sampleRate ?? 44100])]
+      .sort((a, b) => b - a)
+      .map((rate) => ({ value: String(rate), label: `${rate / 1000} kHz` })),
+  );
   const selected = $derived(project && selectedClip ? findClip(project, selectedClip) : null);
   const announcement = $derived.by(() => {
     if (!project || !selected) return '';
@@ -129,17 +169,16 @@
     return `Selected ${assetName(clip.assetId)} on track ${project.tracks.indexOf(track) + 1}, ${clip.start.toFixed(1)} to ${(clip.start + clipLength(clip)).toFixed(1)} seconds`;
   });
 
-  const estimate = $derived.by(() => {
+  function estimate(quality: number): number | null {
     if (!project) return null;
     const seconds = duration / project.speed;
-    if (exportMb) return exportMb * 1_000_000;
     const t = exportTarget;
     if (t === 'wav' || t === 'aiff' || t === 'au' || t === 'caf')
       return seconds * project.sampleRate * project.channels * 2;
     if (t === 'flac' || t === 'alac' || t === 'wv')
       return seconds * project.sampleRate * project.channels * 1.2;
-    return (seconds * audioBitrate(exportQuality, project.channels)) / 8;
-  });
+    return (seconds * audioBitrate(quality, project.channels)) / 8;
+  }
 
   const apply = (label: string, next: AudioProject) => history.apply(label, next);
   const edit = (label: string, fn: (p: AudioProject) => AudioProject) =>
@@ -261,9 +300,33 @@
     }
   }
 
+  function setNormalise(mode: AudioProject['normalize']['mode'], target = -14) {
+    if (!project) return;
+    const normalize =
+      mode === 'peak'
+        ? { mode, db: -1 }
+        : mode === 'lufs'
+          ? { mode, target }
+          : { mode: 'off' as const };
+    apply('Normalise', { ...project, normalize });
+  }
+
+  function setTrack(id: string, patch: { gain?: number; muted?: boolean }, label: string) {
+    if (!project) return;
+    apply(label, {
+      ...project,
+      tracks: project.tracks.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+    });
+  }
+
   function keydown(event: KeyboardEvent) {
     const mod = event.ctrlKey || event.metaKey;
-    if ((event.target as HTMLElement).closest('input, select, textarea')) return;
+    if (
+      (event.target as HTMLElement).closest(
+        'input, select, textarea, [role=slider], [role=radio], [role=switch], [role=combobox], [role=listbox]',
+      )
+    )
+      return;
     if (mod && event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) history.redo();
@@ -277,11 +340,32 @@
   }
 
   const time = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
-  const db = (gain: number) => (20 * Math.log10(Math.max(gain, 1e-6))).toFixed(1);
-  const value = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
+  const db = (gain: number) => 20 * Math.log10(Math.max(gain, 1e-6));
 </script>
 
 <svelte:window onkeydown={keydown} />
+
+{#snippet volume(label: string, gain: number, onGain: (gain: number) => void)}
+  <Slider
+    {label}
+    value={db(gain)}
+    min={-30}
+    max={12}
+    step={0.5}
+    decimals={1}
+    defaultValue={0}
+    unit="dB"
+    signed
+    onChange={(v) => onGain(10 ** (v / 20))}
+  />
+{/snippet}
+
+{#snippet loudness(o: SegmentedOption<number>)}
+  <span class="flex min-w-0 flex-col items-center leading-tight">
+    <span>{o.label}</span>
+    <span class="text-[10px] text-muted tabular-nums">−{Math.abs(o.value)} LUFS</span>
+  </span>
+{/snippet}
 
 <p class="sr-only" aria-live="polite">{announcement}</p>
 
@@ -358,7 +442,7 @@
                 title="Delete the selection (Delete)"
                 onclick={deleteSelection}><Trash2 size={14} /> Delete</button
               >
-              <label class="inline-flex items-center gap-1.5 text-sm">
+              <div class="inline-flex items-center gap-1.5 text-sm">
                 <button
                   type="button"
                   class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1.5"
@@ -367,15 +451,18 @@
                       insertSilence(p, session.position, silenceSeconds),
                     )}>Insert silence</button
                 >
-                <input
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  bind:value={silenceSeconds}
-                  class="w-16 rounded-lg border border-line bg-surface px-2 py-1"
-                  aria-label="Seconds of silence"
-                /> s
-              </label>
+                <div class="w-20">
+                  <NumberField
+                    label="Seconds of silence"
+                    hideLabel
+                    value={silenceSeconds}
+                    min={0.1}
+                    step={0.1}
+                    unit="s"
+                    onChange={(s) => (silenceSeconds = s)}
+                  />
+                </div>
+              </div>
               <label class="ml-auto inline-flex items-center gap-2 text-xs text-muted">
                 Zoom
                 <input
@@ -450,64 +537,34 @@
             class="w-80 shrink-0 space-y-5 overflow-y-auto border-l border-line bg-raised p-4 text-sm"
           >
             {#if selected}
+              {@const fadeMax = Math.max(0.1, Math.min(10, clipLength(selected.clip) / 2))}
               <section class="space-y-2">
                 <h3 class="font-medium">Clip · {assetName(selected.clip.assetId)}</h3>
-                <label class="grid gap-1 text-xs">
-                  <span class="flex justify-between"
-                    >Volume <span class="text-muted tabular-nums">{db(selected.clip.gain)} dB</span
-                    ></span
-                  >
-                  <input
-                    type="range"
-                    min="-30"
-                    max="12"
-                    step="0.5"
-                    value={Number(db(selected.clip.gain))}
-                    class="accent-accent"
-                    oninput={(e) =>
-                      apply(
-                        'Clip volume',
-                        updateClip(project, selected.clip.id, { gain: 10 ** (value(e) / 20) }),
-                      )}
-                  />
-                </label>
-                <label class="grid gap-1 text-xs">
-                  <span class="flex justify-between"
-                    >Fade in <span class="text-muted tabular-nums"
-                      >{selected.clip.fadeIn.toFixed(1)} s</span
-                    ></span
-                  >
-                  <input
-                    type="range"
-                    min="0"
-                    max={Math.min(10, clipLength(selected.clip) / 2)}
-                    step="0.1"
-                    value={selected.clip.fadeIn}
-                    class="accent-accent"
-                    oninput={(e) =>
-                      apply('Fade in', updateClip(project, selected.clip.id, { fadeIn: value(e) }))}
-                  />
-                </label>
-                <label class="grid gap-1 text-xs">
-                  <span class="flex justify-between"
-                    >Fade out <span class="text-muted tabular-nums"
-                      >{selected.clip.fadeOut.toFixed(1)} s</span
-                    ></span
-                  >
-                  <input
-                    type="range"
-                    min="0"
-                    max={Math.min(10, clipLength(selected.clip) / 2)}
-                    step="0.1"
-                    value={selected.clip.fadeOut}
-                    class="accent-accent"
-                    oninput={(e) =>
-                      apply(
-                        'Fade out',
-                        updateClip(project, selected.clip.id, { fadeOut: value(e) }),
-                      )}
-                  />
-                </label>
+                {@render volume('Volume', selected.clip.gain, (gain) =>
+                  apply('Clip volume', updateClip(project, selected.clip.id, { gain })),
+                )}
+                <Slider
+                  label="Fade in"
+                  value={selected.clip.fadeIn}
+                  min={0}
+                  max={fadeMax}
+                  step={0.1}
+                  defaultValue={0}
+                  unit="s"
+                  onChange={(fadeIn) =>
+                    apply('Fade in', updateClip(project, selected.clip.id, { fadeIn }))}
+                />
+                <Slider
+                  label="Fade out"
+                  value={selected.clip.fadeOut}
+                  min={0}
+                  max={fadeMax}
+                  step={0.1}
+                  defaultValue={0}
+                  unit="s"
+                  onChange={(fadeOut) =>
+                    apply('Fade out', updateClip(project, selected.clip.id, { fadeOut }))}
+                />
                 <button
                   type="button"
                   class="rounded-full border border-line transition-colors enabled:hover:border-accent enabled:hover:text-accent px-3 py-1 text-xs"
@@ -517,43 +574,22 @@
               </section>
               <section class="space-y-2">
                 <h3 class="font-medium">Track</h3>
-                <label class="grid gap-1 text-xs">
-                  <span class="flex justify-between"
-                    >Track volume <span class="text-muted tabular-nums"
-                      >{db(selected.track.gain)} dB</span
-                    ></span
-                  >
-                  <input
-                    type="range"
-                    min="-30"
-                    max="12"
-                    step="0.5"
-                    value={Number(db(selected.track.gain))}
-                    class="accent-accent"
-                    oninput={(e) =>
-                      apply('Track volume', {
-                        ...project,
-                        tracks: project.tracks.map((t) =>
-                          t.id === selected.track.id ? { ...t, gain: 10 ** (value(e) / 20) } : t,
-                        ),
-                      })}
-                  />
-                </label>
-                <label class="flex items-center gap-2 text-xs"
-                  ><input
-                    type="checkbox"
-                    checked={selected.track.muted}
-                    onchange={(e) =>
-                      apply('Mute', {
-                        ...project,
-                        tracks: project.tracks.map((t) =>
-                          t.id === selected.track.id
-                            ? { ...t, muted: (e.currentTarget as HTMLInputElement).checked }
-                            : t,
-                        ),
-                      })}
-                  /> Mute this track</label
-                >
+                <div class="flex items-start gap-2">
+                  <div class="min-w-0 flex-1">
+                    {@render volume('Track volume', selected.track.gain, (gain) =>
+                      setTrack(selected.track.id, { gain }, 'Track volume'),
+                    )}
+                  </div>
+                  <div class="mt-5.5">
+                    <IconToggle
+                      label="Mute this track"
+                      pressed={selected.track.muted}
+                      icon={Volume2}
+                      pressedIcon={VolumeX}
+                      onChange={(muted) => setTrack(selected.track.id, { muted }, 'Mute')}
+                    />
+                  </div>
+                </div>
               </section>
             {/if}
 
@@ -564,134 +600,69 @@
                 disabled={project.normalize.mode !== 'off'}
                 onChange={(gain) => apply('Overall volume', { ...project, gain })}
               />
-              <label class="grid gap-1 text-xs">
-                Normalise
-                <select
-                  class="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
-                  value={project.normalize.mode === 'off'
-                    ? 'off'
-                    : project.normalize.mode === 'peak'
-                      ? `peak:${project.normalize.db}`
-                      : `lufs:${project.normalize.target}`}
-                  onchange={(e) => {
-                    const [mode, n] = (e.currentTarget as HTMLSelectElement).value.split(':');
-                    const normalize =
-                      mode === 'peak'
-                        ? { mode: 'peak' as const, db: Number(n) }
-                        : mode === 'lufs'
-                          ? { mode: 'lufs' as const, target: Number(n) }
-                          : { mode: 'off' as const };
-                    apply('Normalise', { ...project, normalize });
-                  }}
-                >
-                  <option value="off">Off</option>
-                  <option value="peak:-1">Loudest peak at −1 dB</option>
-                  <option value="lufs:-14">Streaming loudness (−14 LUFS)</option>
-                  <option value="lufs:-16">Podcast loudness (−16 LUFS)</option>
-                  <option value="lufs:-23">Broadcast loudness (−23 LUFS)</option>
-                </select>
-              </label>
-              <label class="flex items-center gap-2 text-xs"
-                ><input
-                  type="checkbox"
-                  checked={project.trimSilence}
-                  onchange={(e) =>
-                    apply('Trim silence', {
-                      ...project,
-                      trimSilence: (e.currentTarget as HTMLInputElement).checked,
-                    })}
-                /> Remove silence at the start and end</label
-              >
-              <label class="grid gap-1 text-xs">
-                Channels
-                <select
-                  class="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
-                  value={project.channelOp}
-                  onchange={(e) =>
-                    apply('Channels', {
-                      ...project,
-                      channelOp: (e.currentTarget as HTMLSelectElement)
-                        .value as AudioProject['channelOp'],
-                    })}
-                >
-                  <option value="none">As recorded</option>
-                  <option value="mono">Mix to mono</option>
-                  <option value="swap">Swap left and right</option>
-                  <option value="left">Left channel only</option>
-                  <option value="right">Right channel only</option>
-                </select>
-              </label>
-              <label class="grid gap-1 text-xs">
-                <span class="flex justify-between"
-                  >Speed (pitch kept) <span class="text-muted tabular-nums"
-                    >{project.speed.toFixed(2)}×</span
-                  ></span
-                >
-                <input
-                  type="range"
-                  min="0.5"
-                  max="2"
-                  step="0.05"
-                  value={project.speed}
-                  class="accent-accent"
-                  oninput={(e) => apply('Speed', { ...project, speed: value(e) })}
+              <Segmented
+                label="Normalise"
+                options={NORMALISE_MODES}
+                value={project.normalize.mode}
+                onChange={(mode) => setNormalise(mode)}
+              />
+              {#if project.normalize.mode === 'lufs'}
+                <Segmented
+                  label="Loudness target"
+                  options={LOUDNESS_TARGETS}
+                  value={project.normalize.target}
+                  option={loudness}
+                  onChange={(target) => setNormalise('lufs', target)}
                 />
-              </label>
-              <label class="grid gap-1 text-xs">
-                Sample rate
-                <select
-                  class="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
-                  value={project.sampleRate}
-                  onchange={(e) =>
-                    apply('Sample rate', {
-                      ...project,
-                      sampleRate: Number((e.currentTarget as HTMLSelectElement).value),
-                    })}
-                >
-                  {#each [96000, 48000, 44100, 32000, 22050] as rate (rate)}<option value={rate}
-                      >{rate / 1000} kHz</option
-                    >{/each}
-                </select>
-              </label>
+              {/if}
+              <Switch
+                label="Remove silence at the start and end"
+                checked={project.trimSilence}
+                onChange={(trimSilence) => apply('Trim silence', { ...project, trimSilence })}
+              />
+              <Select
+                label="Channels"
+                options={CHANNEL_OPS}
+                value={project.channelOp}
+                onChange={(channelOp) => apply('Channels', { ...project, channelOp })}
+              />
+              <Slider
+                label="Speed (pitch kept)"
+                value={project.speed}
+                min={0.5}
+                max={2}
+                step={0.05}
+                defaultValue={1}
+                unit="×"
+                marks={[{ value: 1, label: '1×' }]}
+                onChange={(speed) => apply('Speed', { ...project, speed })}
+              />
             </section>
+
+            <Section id="audio-advanced" title="Advanced" defaultOpen={false}>
+              <Select
+                label="Sample rate"
+                options={sampleRates}
+                value={String(project.sampleRate)}
+                onChange={(rate) => apply('Sample rate', { ...project, sampleRate: Number(rate) })}
+              />
+            </Section>
 
             <section class="space-y-2">
               <h3 class="font-medium">Export</h3>
-              <select
-                class="w-full rounded-lg border border-line bg-surface px-2 py-1.5"
-                bind:value={exportTarget}
-                aria-label="Export format"
-              >
-                {#each AUDIO_TARGETS as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
-              </select>
-              <label class="grid gap-1 text-xs">
-                <span class="flex justify-between"
-                  ><span>Smaller file</span><span>Better quality</span></span
-                >
-                <input
-                  type="range"
-                  min="1"
-                  max="100"
-                  bind:value={exportQuality}
-                  class="accent-accent"
-                  aria-label="Quality"
-                />
-              </label>
-              <label class="flex items-center gap-2 text-xs">
-                Fit to
-                <input
-                  type="number"
-                  min="0.1"
-                  step="any"
-                  placeholder="Off"
-                  class="w-20 rounded-lg border border-line bg-surface px-2 py-1"
-                  value={exportMb ?? ''}
-                  onchange={(e) =>
-                    (exportMb = (e.currentTarget as HTMLInputElement).value ? value(e) : null)}
-                />
-                MB
-              </label>
-              {#if estimate}<p class="text-xs text-muted">About {formatBytes(estimate)}</p>{/if}
+              <Select
+                label="Export format"
+                options={EXPORT_FORMATS}
+                value={exportTarget}
+                onChange={(id) => (exportTarget = id)}
+              />
+              <QualityPicker
+                quality={exportQuality}
+                targetMb={exportMb}
+                {estimate}
+                onChange={(q) => (exportQuality = q)}
+                onTargetMb={(mb) => (exportMb = mb)}
+              />
               {#if exporting}
                 <p class="inline-flex items-center gap-2 text-muted">
                   <LoaderCircle size={14} class="animate-spin" />
@@ -705,15 +676,13 @@
                   onclick={runExport}>Export</button
                 >
               {/if}
-              {#if !exporting}<label class="flex items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    class="accent-accent"
-                    checked={files.autoDownload}
-                    onchange={(e) => files.setAutoDownload(e.currentTarget.checked)}
-                  />
-                  Download when it's done
-                </label>{/if}
+              {#if !exporting}
+                <Switch
+                  label="Download when it's done"
+                  checked={files.autoDownload}
+                  onChange={(on) => files.setAutoDownload(on)}
+                />
+              {/if}
               {#if exportError}<p class="text-danger">{exportError}</p>{/if}
               {#if exported}
                 <div class="space-y-1 rounded-xl bg-sunken p-3">

@@ -201,6 +201,15 @@ const api = {
     await draw(project, time, maxEdge);
   },
 
+  // `x` and `y` are fractions of the preview; returns the drawn colour there as #rrggbb.
+  colourAt(x: number, y: number): string | null {
+    if (!canvas) return null;
+    const px = Math.min(canvas.width - 1, Math.max(0, Math.floor(x * canvas.width)));
+    const py = Math.min(canvas.height - 1, Math.max(0, Math.floor(y * canvas.height)));
+    const [r, g, b] = canvas.getContext('2d')!.getImageData(px, py, 1, 1).data;
+    return `#${[r!, g!, b!].map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+  },
+
   // Draws whichever frame matches the audio clock until stopped or the audio ends.
   async play(
     project: VideoProject,

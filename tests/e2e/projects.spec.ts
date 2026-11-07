@@ -56,7 +56,7 @@ async function buildVideoProject(page: Page) {
       mimeType: 'font/woff2',
       buffer: readFileSync(FONT),
     });
-  await expect(textClip(page).getByRole('combobox', { name: 'Font' })).toHaveValue(
+  await expect(textClip(page).getByRole('combobox', { name: 'Font' })).toHaveText(
     'Headline (yours)',
   );
 }
@@ -109,7 +109,7 @@ test('reopens a video project bundle with its media and font', async ({ page, br
   await expectVideoProject(page);
   await selectText(page);
   await expect(page.getByRole('textbox', { name: 'Text', exact: true })).toHaveValue('Saved title');
-  await expect(textClip(page).getByRole('combobox', { name: 'Font' })).toHaveValue(
+  await expect(textClip(page).getByRole('combobox', { name: 'Font' })).toHaveText(
     'Headline (yours)',
   );
 });

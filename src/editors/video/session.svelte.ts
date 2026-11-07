@@ -36,6 +36,7 @@ export class VideoSession {
   private api: Comlink.Remote<VideoApi>;
   private wanted: { project: VideoProject; time: number } | null = null;
   private rendering = false;
+  private rendered: Promise<void> = Promise.resolve();
 
   constructor() {
     this.worker = new Worker(new URL('../../workers/video.worker.ts', import.meta.url), {
@@ -125,7 +126,7 @@ export class VideoSession {
 
   render(project: VideoProject, time: number): void {
     this.wanted = { project, time };
-    void this.pump();
+    if (!this.rendering) this.rendered = this.pump();
   }
 
   private async pump(): Promise<void> {
@@ -142,6 +143,12 @@ export class VideoSession {
     } finally {
       this.rendering = false;
     }
+  }
+
+  // The colour drawn at fractions `x`, `y` of the preview, once any queued frame is on screen.
+  async colourAt(x: number, y: number): Promise<string | null> {
+    await this.rendered;
+    return this.api.colourAt(x, y);
   }
 
   // Resolves once sound is playing; frames follow the audio clock until `stop`. `heard` is the project

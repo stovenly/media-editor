@@ -1,14 +1,24 @@
 <script lang="ts">
-  import { ChevronRight, RotateCcw } from '@lucide/svelte';
+  import { ChevronRight } from '@lucide/svelte';
   import { Collapsible } from 'bits-ui';
-  import type { Snippet } from 'svelte';
+  import ColourField, { provideProjectColours } from '../app/ui/ColourField.svelte';
+  import Field from '../app/ui/Field.svelte';
+  import NumberField from '../app/ui/NumberField.svelte';
+  import QualityPicker from '../app/ui/QualityPicker.svelte';
+  import Segmented, { type SegmentedOption } from '../app/ui/Segmented.svelte';
+  import Select, { type SelectOption } from '../app/ui/Select.svelte';
+  import Slider from '../app/ui/Slider.svelte';
+  import Switch from '../app/ui/Switch.svelte';
   import { inspectPool, scheduler } from '../engine';
+  import { estimateBytes } from '../engine/av/plan';
   import { target } from '../engine/targets';
   import { changedKeys, describeChanges } from './describe';
   import { files, type FileItem } from './files.svelte';
   import type { ConvertOptions } from './options';
+  import { avSettings } from './run';
 
   type Key = keyof ConvertOptions;
+  type SizeChoice = number | 'original' | 'custom';
 
   const LOSSY = new Set([
     'jpeg',
@@ -34,9 +44,10 @@
     'ac3',
   ]);
   const LOSSLESS_CAPABLE = new Set(['webp', 'avif', 'jxl', 'webp-anim']);
-  const IMAGE_SIZES = [3840, 2560, 1920, 1280, 1024, 800, 512, 256];
-  const VIDEO_HEIGHTS = [2160, 1440, 1080, 720, 480, 360];
+  const IMAGE_SIZES = { main: [1920, 1280, 800], other: [3840, 2560, 1024, 512, 256] };
+  const VIDEO_HEIGHTS = { main: [1080, 720, 480], other: [2160, 1440, 360] };
   const QUICK_MB = [8, 10, 25, 50, 100];
+  const FIT_OFF = 0;
   const FPS = [60, 30, 24, 15];
   const AUDIO_KBPS = [320, 256, 192, 160, 128, 96, 64];
   const SAMPLE_RATES = [48000, 44100, 32000, 22050];
@@ -57,6 +68,13 @@
     diff: 'Smallest file',
     gifski: 'Best quality (gifski, slower)',
   };
+  const METADATA: SelectOption<ConvertOptions['metadata']>[] = [
+    { value: 'none', label: 'Remove all (location, camera, dates)' },
+    { value: 'technical', label: 'Keep colour profile only' },
+    { value: 'all', label: 'Keep everything' },
+  ];
+  // Select values are strings; this one stands for a null option.
+  const UNSET = 'default';
 
   let encodable = $state<string[]>(['avc']);
   $effect(() => {
@@ -142,175 +160,76 @@
   const advancedSummary = $derived(describeChanges(o, advancedKeys));
 
   const set = (patch: Partial<ConvertOptions>) => files.setOptions(patch);
-  const numberOrNull = (value: string) => (value === '' ? null : Number(value));
+  const changed = (keys: Key[]) => changedKeys(o, keys).length > 0;
+  const reset = (keys: Key[]) => () => files.resetOptions(keys);
+  provideProjectColours(() => [o.background, o.maskableBackground]);
+  function estimate(quality: number): number | null {
+    const id = files.targetOf(item);
+    const probe = item.inspection?.av;
+    if (!id || !probe || item.inspection?.sniffed.kind === 'image') return null;
+    return estimateBytes(probe, avSettings(id, { ...o, quality, targetMb: null }));
+  }
 
-  let customMb = $state('');
   let customSize = $state({ maxEdge: false, height: false });
+  const fitChoice = $derived(
+    o.targetMb === null ? FIT_OFF : QUICK_MB.includes(o.targetMb) ? o.targetMb : null,
+  );
+  const FIT_OPTIONS: SegmentedOption<number>[] = [
+    { value: FIT_OFF, label: 'Off' },
+    ...QUICK_MB.map((mb) => ({ value: mb, label: `${mb} MB` })),
+  ];
+
+  function sizeOptions(
+    presets: readonly number[],
+    name: (n: number) => string,
+    tooltip: (n: number) => string,
+  ): SegmentedOption<SizeChoice>[] {
+    return [
+      { value: 'original', label: 'Original' },
+      ...presets.map((n) => ({ value: n, label: name(n), tooltip: tooltip(n) })),
+      { value: 'custom', label: 'Custom' },
+    ];
+  }
 </script>
-
-{#snippet field(label: string, keys: Key[], control: Snippet, hint?: string)}
-  <div class="grid gap-1.5">
-    <div class="flex items-center gap-2">
-      <span class="text-sm font-medium">{label}</span>
-      {#if changedKeys(o, keys).length}
-        <button
-          type="button"
-          class="inline-flex items-center gap-1 text-xs text-muted hover:text-accent"
-          aria-label="Reset {label.toLowerCase()}"
-          onclick={() => files.resetOptions(keys)}
-        >
-          <RotateCcw size={12} /> Reset
-        </button>
-      {/if}
-    </div>
-    {@render control()}
-    {#if hint}<p class="text-xs text-muted">{hint}</p>{/if}
-  </div>
-{/snippet}
-
-{#snippet quality()}
-  <div class="flex items-center gap-3 text-xs text-muted">
-    <span class="shrink-0">Smaller file</span>
-    <input
-      type="range"
-      min="1"
-      max="100"
-      value={o.quality}
-      aria-label="Quality"
-      class="w-0 min-w-0 flex-1 accent-accent"
-      onchange={(e) => set({ quality: Number(e.currentTarget.value) })}
-    />
-    <span class="shrink-0">Better quality</span>
-  </div>
-{/snippet}
 
 {#snippet sizeField(
   label: string,
   key: 'maxEdge' | 'height',
-  presets: readonly number[],
+  presets: { main: readonly number[]; other: readonly number[] },
   name: (n: number) => string,
-  unit: string,
+  tooltip: (n: number) => string,
+  fieldLabel: string,
 )}
   {@const value = o[key]}
-  {@const custom = customSize[key] || (value !== null && !presets.includes(value))}
-  <div class="grid gap-2">
-    <select
-      class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
-      aria-label={label}
-      value={custom ? 'custom' : (value ?? '')}
-      onchange={(e) => {
-        const picked = e.currentTarget.value;
-        customSize[key] = picked === 'custom';
-        if (picked !== 'custom') set({ [key]: numberOrNull(picked) });
-      }}
-    >
-      <option value="">Original size</option>
-      {#each presets as size (size)}
-        <option value={size}>{name(size)}</option>
-      {/each}
-      <option value="custom">Custom…</option>
-    </select>
-    {#if custom}
-      <label class="flex items-center gap-2 text-sm">
-        <input
-          type="number"
-          min="16"
-          step="1"
-          class="w-28 rounded-xl border border-line bg-surface px-3 py-1.5"
-          aria-label="{label} in pixels"
-          value={value ?? ''}
-          onchange={(e) => {
-            const n = Math.round(Number(e.currentTarget.value));
-            if (n >= 16) set({ [key]: n });
-          }}
-        />
-        {unit}
-      </label>
-    {/if}
-  </div>
-{/snippet}
-
-{#snippet imageSize()}
-  {@render sizeField(
-    'Image size',
-    'maxEdge',
-    IMAGE_SIZES,
-    (n) => `At most ${n} px`,
-    'px on the longest side',
-  )}
-{/snippet}
-
-{#snippet videoSize()}
-  {@render sizeField(
-    'Video size',
-    'height',
-    VIDEO_HEIGHTS,
-    (h) => (h === 2160 ? '4K' : `${h}p`),
-    'px tall',
-  )}
-{/snippet}
-
-{#snippet fit()}
-  <div class="flex flex-wrap items-center gap-1.5">
-    <button
-      type="button"
-      class="rounded-full border px-3 py-1 text-sm {o.targetMb === null
-        ? 'border-accent text-accent'
-        : 'border-line hover:border-accent hover:text-accent'}"
-      onclick={() => set({ targetMb: null })}>Off</button
-    >
-    {#each QUICK_MB as mb (mb)}
-      <button
-        type="button"
-        class="rounded-full border px-3 py-1 text-sm {o.targetMb === mb
-          ? 'border-accent text-accent'
-          : 'border-line hover:border-accent hover:text-accent'}"
-        onclick={() => set({ targetMb: mb })}>{mb} MB</button
-      >
-    {/each}
-    <label class="inline-flex items-center gap-1.5 text-sm">
-      <input
-        type="number"
-        min="0.01"
-        step="any"
-        placeholder="Custom"
-        class="w-24 rounded-full border border-line bg-surface px-3 py-1 text-sm"
-        bind:value={customMb}
-        onchange={() => {
-          const mb = Number(customMb);
-          if (mb > 0) set({ targetMb: mb });
-        }}
-      />
-      MB
-    </label>
-  </div>
-{/snippet}
-
-{#snippet colour(key: 'background' | 'maskableBackground', label: string)}
-  <label class="inline-flex items-center gap-2 text-sm">
-    <input
-      type="color"
-      value={o[key]}
-      aria-label={label}
-      class="size-8 cursor-pointer rounded-lg border border-line bg-surface"
-      onchange={(e) => set({ [key]: e.currentTarget.value })}
+  {@const custom = customSize[key] || (value !== null && !presets.main.includes(value))}
+  <Segmented
+    {label}
+    hideLabel
+    options={sizeOptions(presets.main, name, tooltip)}
+    value={custom ? 'custom' : (value ?? 'original')}
+    onChange={(picked) => {
+      customSize[key] = picked === 'custom';
+      if (picked !== 'custom') set({ [key]: picked === 'original' ? null : picked });
+    }}
+  />
+  {#if custom}
+    <Segmented
+      label="Other {label.toLowerCase()}s"
+      hideLabel
+      options={presets.other.map((n) => ({ value: n, label: name(n), tooltip: tooltip(n) }))}
+      value={value !== null && presets.other.includes(value) ? value : null}
+      onChange={(n) => set({ [key]: n })}
     />
-    <span class="font-mono text-xs text-muted">{o[key]}</span>
-  </label>
-{/snippet}
-
-{#snippet background()}{@render colour('background', 'Background colour')}{/snippet}
-{#snippet maskable()}{@render colour('maskableBackground', 'Icon background colour')}{/snippet}
-
-{#snippet removeAudio()}
-  <label class="inline-flex items-center gap-2 text-sm">
-    <input
-      type="checkbox"
-      checked={o.removeAudio}
-      onchange={(e) => set({ removeAudio: e.currentTarget.checked })}
+    <NumberField
+      label={fieldLabel}
+      {value}
+      min={16}
+      unit="px"
+      placeholder="Original"
+      onChange={(n) => set({ [key]: n })}
+      onClear={() => set({ [key]: null })}
     />
-    Remove the audio track
-  </label>
+  {/if}
 {/snippet}
 
 {#snippet choice(
@@ -320,209 +239,160 @@
   format: (value: string | number) => string,
   empty: string,
 )}
-  <select
-    class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
-    aria-label={label}
-    value={o[key] ?? ''}
-    onchange={(e) => {
-      const raw = e.currentTarget.value;
-      const value = raw === '' ? null : typeof values[0] === 'number' ? Number(raw) : raw;
+  {@const current = o[key]}
+  <Select
+    {label}
+    hideLabel
+    options={[
+      ...(empty ? [{ value: UNSET, label: empty }] : []),
+      ...values.map((v) => ({ value: String(v), label: format(v) })),
+    ]}
+    value={current === null ? UNSET : String(current)}
+    onChange={(raw) => {
+      const value = raw === UNSET ? null : typeof values[0] === 'number' ? Number(raw) : raw;
       set({ [key]: value });
     }}
-  >
-    {#if empty}<option value="">{empty}</option>{/if}
-    {#each values as value (value)}
-      <option {value}>{format(value)}</option>
-    {/each}
-  </select>
-{/snippet}
-
-{#snippet trim()}
-  <div class="flex items-center gap-2 text-sm">
-    <input
-      type="number"
-      min="0"
-      step="0.1"
-      placeholder="Start"
-      aria-label="Start, in seconds"
-      class="w-24 rounded-lg border border-line bg-surface px-2 py-1"
-      value={o.trimStart ?? ''}
-      onchange={(e) => set({ trimStart: numberOrNull(e.currentTarget.value) })}
-    />
-    to
-    <input
-      type="number"
-      min="0"
-      step="0.1"
-      placeholder="End"
-      aria-label="End, in seconds"
-      class="w-24 rounded-lg border border-line bg-surface px-2 py-1"
-      value={o.trimEnd ?? ''}
-      onchange={(e) => set({ trimEnd: numberOrNull(e.currentTarget.value) })}
-    />
-    seconds
-  </div>
-{/snippet}
-
-{#snippet codec()}{@render choice(
-    'videoCodec',
-    'Video codec',
-    codecIds,
-    (v) => CODECS.find((c) => c.id === v)?.label ?? 'ProRes 4444 (MOV, keeps transparency)',
-    'Automatic',
-  )}{/snippet}
-{#snippet fps()}{@render choice('fps', 'Frame rate', FPS, (v) => `${v} fps`, 'Original')}{/snippet}
-{#snippet audioKbps()}{@render choice(
-    'audioKbps',
-    'Audio bitrate',
-    AUDIO_KBPS,
-    (v) => `${v} kbps`,
-    'Automatic',
-  )}{/snippet}
-{#snippet sampleRate()}{@render choice(
-    'sampleRate',
-    'Sample rate',
-    SAMPLE_RATES,
-    (v) => `${Number(v) / 1000} kHz`,
-    'Original',
-  )}{/snippet}
-{#snippet channels()}{@render choice(
-    'channels',
-    'Channels',
-    [2, 1],
-    (v) => (v === 1 ? 'Mono' : 'Stereo'),
-    'Original',
-  )}{/snippet}
-{#snippet gifFps()}{@render choice(
-    'gifFps',
-    'Animation frame rate',
-    [30, 25, 20, 15, 12, 10, 8, 5],
-    (v) => `${v} fps`,
-    '',
-  )}{/snippet}
-{#snippet gifWidth()}{@render choice(
-    'gifWidth',
-    'Animation width',
-    [1280, 960, 720, 640, 480, 360, 320, 240],
-    (v) => `${v} px wide`,
-    '',
-  )}{/snippet}
-{#snippet gifDither()}{@render choice(
-    'gifDither',
-    'Dithering',
-    ['floyd', 'bayer', 'none'],
-    (v) => DITHER[String(v)] ?? String(v),
-    '',
-  )}{/snippet}
-{#snippet gifPalette()}{@render choice(
-    'gifPalette',
-    'Palette',
-    ['global', 'per-frame', 'diff', 'gifski'],
-    (v) => PALETTE[String(v)] ?? String(v),
-    '',
-  )}{/snippet}
-
-{#snippet keepHdr()}
-  <label class="inline-flex items-center gap-2 text-sm">
-    <input
-      type="checkbox"
-      checked={o.keepHdr}
-      onchange={(e) => set({ keepHdr: e.currentTarget.checked })}
-    />
-    Keep HDR (JPG to JPG at the original size)
-  </label>
-{/snippet}
-
-{#snippet metadata()}
-  <select
-    class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
-    aria-label="Metadata"
-    value={o.metadata}
-    onchange={(e) => set({ metadata: e.currentTarget.value as ConvertOptions['metadata'] })}
-  >
-    <option value="none">Remove all (location, camera, dates)</option>
-    <option value="technical">Keep colour profile only</option>
-    <option value="all">Keep everything</option>
-  </select>
-{/snippet}
-
-{#snippet lossless()}
-  <label class="inline-flex items-center gap-2 text-sm">
-    <input
-      type="checkbox"
-      checked={o.lossless}
-      onchange={(e) => set({ lossless: e.currentTarget.checked })}
-    />
-    Lossless (WebP, AVIF, JPEG XL)
-  </label>
-{/snippet}
-
-{#snippet gifThreshold()}
-  <input
-    type="range"
-    min="1"
-    max="254"
-    value={o.gifThreshold}
-    aria-label="GIF transparency threshold"
-    class="w-full accent-accent"
-    onchange={(e) => set({ gifThreshold: Number(e.currentTarget.value) })}
   />
 {/snippet}
 
-{#snippet hotspot()}
-  <div class="flex items-center gap-3 text-sm">
-    <label class="inline-flex items-center gap-1.5"
-      >X <input
-        type="number"
-        min="0"
-        max="31"
-        value={o.hotspotX}
-        class="w-16 rounded-lg border border-line bg-surface px-2 py-1"
-        onchange={(e) => set({ hotspotX: Number(e.currentTarget.value) })}
-      /></label
-    >
-    <label class="inline-flex items-center gap-1.5"
-      >Y <input
-        type="number"
-        min="0"
-        max="31"
-        value={o.hotspotY}
-        class="w-16 rounded-lg border border-line bg-surface px-2 py-1"
-        onchange={(e) => set({ hotspotY: Number(e.currentTarget.value) })}
-      /></label
-    >
-  </div>
+{#snippet advancedChoice(
+  key: Key,
+  label: string,
+  values: readonly (string | number)[],
+  format: (value: string | number) => string,
+  empty = '',
+)}
+  <Field {label} changed={changed([key])} onReset={reset([key])}>
+    {@render choice(key, label, values, format, empty)}
+  </Field>
 {/snippet}
 
 <section class="grid gap-5 p-5" aria-labelledby="options-heading">
   <h2 id="options-heading" class="text-sm font-semibold">Options</h2>
-  {#if context.quality}{@render field('Quality', ['quality'], quality)}{/if}
-  {#if context.imageSize}{@render field(
-      'Image size',
-      ['maxEdge'],
-      imageSize,
-      'Never enlarges.',
-    )}{/if}
-  {#if context.videoSize}{@render field('Video size', ['height'], videoSize)}{/if}
-  {@render field(
-    'Fit to file size',
-    ['targetMb'],
-    fit,
-    'The result is never larger than this without a warning.',
-  )}
-  {#if context.background}{@render field(
-      'Background for transparent areas',
-      ['background'],
-      background,
-    )}{/if}
-  {#if context.removeAudio}{@render field('Audio', ['removeAudio'], removeAudio)}{/if}
-  {#if context.hdr}{@render field('HDR', ['keepHdr'], keepHdr)}{/if}
-  {#if context.av}{@render field(
-      'Trim',
-      ['trimStart', 'trimEnd'],
-      trim,
-      'Leave empty to keep the whole clip.',
-    )}{/if}
+  {#if context.quality}
+    <QualityPicker quality={o.quality} {estimate} onChange={(quality) => set({ quality })} />
+  {/if}
+  {#if context.imageSize}
+    <Field
+      label="Image size"
+      hint="Never enlarges."
+      changed={changed(['maxEdge'])}
+      onReset={reset(['maxEdge'])}
+    >
+      {@render sizeField(
+        'Image size',
+        'maxEdge',
+        IMAGE_SIZES,
+        String,
+        (n) => `At most ${n} px`,
+        'Longest side',
+      )}
+    </Field>
+  {/if}
+  {#if context.videoSize}
+    <Field label="Video size" changed={changed(['height'])} onReset={reset(['height'])}>
+      {@render sizeField(
+        'Video size',
+        'height',
+        VIDEO_HEIGHTS,
+        (h) => (h === 2160 ? '4K' : `${h}p`),
+        (h) => `${h} px tall`,
+        'Height',
+      )}
+    </Field>
+  {/if}
+  <Field
+    label="Fit to file size"
+    hint="The result is never larger than this without a warning."
+    changed={changed(['targetMb'])}
+    onReset={reset(['targetMb'])}
+  >
+    <div class="flex items-center gap-2">
+      <div class="min-w-0 flex-1">
+        <Segmented
+          label="Fit to file size"
+          hideLabel
+          options={FIT_OPTIONS}
+          value={fitChoice}
+          onChange={(mb) => set({ targetMb: mb === FIT_OFF ? null : mb })}
+        />
+      </div>
+      <div class="w-24 shrink-0">
+        <NumberField
+          label="Other file size"
+          hideLabel
+          value={fitChoice === null ? o.targetMb : null}
+          min={0.01}
+          decimals={2}
+          unit="MB"
+          placeholder="Other"
+          onChange={(targetMb) => set({ targetMb })}
+          onClear={() => set({ targetMb: null })}
+        />
+      </div>
+    </div>
+  </Field>
+  {#if context.background}
+    <Field
+      label="Background for transparent areas"
+      changed={changed(['background'])}
+      onReset={reset(['background'])}
+    >
+      <ColourField
+        label="Background colour"
+        hideLabel
+        value={o.background}
+        onChange={(background) => set({ background })}
+      />
+    </Field>
+  {/if}
+  {#if context.removeAudio}
+    <Field label="Audio" changed={changed(['removeAudio'])} onReset={reset(['removeAudio'])}>
+      <Switch
+        label="Remove the audio track"
+        checked={o.removeAudio}
+        onChange={(removeAudio) => set({ removeAudio })}
+      />
+    </Field>
+  {/if}
+  {#if context.hdr}
+    <Field label="HDR" changed={changed(['keepHdr'])} onReset={reset(['keepHdr'])}>
+      <Switch
+        label="Keep HDR (JPG to JPG at the original size)"
+        checked={o.keepHdr}
+        onChange={(keepHdr) => set({ keepHdr })}
+      />
+    </Field>
+  {/if}
+  {#if context.av}
+    <Field
+      label="Trim"
+      hint="Leave empty to keep the whole clip."
+      changed={changed(['trimStart', 'trimEnd'])}
+      onReset={reset(['trimStart', 'trimEnd'])}
+    >
+      <div class="grid grid-cols-2 gap-2">
+        <NumberField
+          label="From"
+          value={o.trimStart}
+          min={0}
+          time
+          placeholder="Start"
+          onChange={(trimStart) => set({ trimStart })}
+          onClear={() => set({ trimStart: null })}
+        />
+        <NumberField
+          label="To"
+          value={o.trimEnd}
+          min={0}
+          time
+          placeholder="End"
+          onChange={(trimEnd) => set({ trimEnd })}
+          onClear={() => set({ trimEnd: null })}
+        />
+      </div>
+    </Field>
+  {/if}
 
   <Collapsible.Root bind:open={advancedOpen}>
     <Collapsible.Trigger class="flex items-center gap-2 text-sm text-muted hover:text-fg">
@@ -533,40 +403,135 @@
         >{/if}
     </Collapsible.Trigger>
     <Collapsible.Content class="mt-4 grid gap-5">
-      {@render field('Metadata', ['metadata'], metadata)}
-      {#if context.lossless}{@render field('Compression', ['lossless'], lossless)}{/if}
+      <Field label="Metadata" changed={changed(['metadata'])} onReset={reset(['metadata'])}>
+        <Select
+          label="Metadata"
+          hideLabel
+          options={METADATA}
+          value={o.metadata}
+          onChange={(metadata) => set({ metadata })}
+        />
+      </Field>
+      {#if context.lossless}
+        <Field label="Compression" changed={changed(['lossless'])} onReset={reset(['lossless'])}>
+          <Switch
+            label="Lossless (WebP, AVIF, JPEG XL)"
+            checked={o.lossless}
+            onChange={(lossless) => set({ lossless })}
+          />
+        </Field>
+      {/if}
       {#if context.videoOut}
-        {@render field('Video codec', ['videoCodec'], codec)}
-        {@render field('Frame rate', ['fps'], fps)}
+        {@render advancedChoice(
+          'videoCodec',
+          'Video codec',
+          codecIds,
+          (v) => CODECS.find((c) => c.id === v)?.label ?? 'ProRes 4444 (MOV, keeps transparency)',
+          'Automatic',
+        )}
+        {@render advancedChoice('fps', 'Frame rate', FPS, (v) => `${v} fps`, 'Original')}
       {/if}
       {#if context.audio}
-        {@render field('Audio bitrate', ['audioKbps'], audioKbps)}
-        {@render field('Sample rate', ['sampleRate'], sampleRate)}
-        {@render field('Channels', ['channels'], channels)}
+        {@render advancedChoice(
+          'audioKbps',
+          'Audio bitrate',
+          AUDIO_KBPS,
+          (v) => `${v} kbps`,
+          'Automatic',
+        )}
+        {@render advancedChoice(
+          'sampleRate',
+          'Sample rate',
+          SAMPLE_RATES,
+          (v) => `${Number(v) / 1000} kHz`,
+          'Original',
+        )}
+        {@render advancedChoice(
+          'channels',
+          'Channels',
+          [2, 1],
+          (v) => (v === 1 ? 'Mono' : 'Stereo'),
+          'Original',
+        )}
       {/if}
       {#if context.videoToAnimated}
-        {@render field('Animation frame rate', ['gifFps'], gifFps)}
-        {@render field('Animation width', ['gifWidth'], gifWidth)}
-        {@render field('Dithering', ['gifDither'], gifDither)}
-        {@render field('Palette', ['gifPalette'], gifPalette)}
+        {@render advancedChoice(
+          'gifFps',
+          'Animation frame rate',
+          [30, 25, 20, 15, 12, 10, 8, 5],
+          (v) => `${v} fps`,
+        )}
+        {@render advancedChoice(
+          'gifWidth',
+          'Animation width',
+          [1280, 960, 720, 640, 480, 360, 320, 240],
+          (v) => `${v} px wide`,
+        )}
+        {@render advancedChoice(
+          'gifDither',
+          'Dithering',
+          ['floyd', 'bayer', 'none'],
+          (v) => DITHER[String(v)] ?? String(v),
+        )}
+        {@render advancedChoice(
+          'gifPalette',
+          'Palette',
+          ['global', 'per-frame', 'diff', 'gifski'],
+          (v) => PALETTE[String(v)] ?? String(v),
+        )}
       {/if}
-      {#if context.gif}{@render field(
-          'GIF transparency cut-off',
-          ['gifThreshold'],
-          gifThreshold,
-          'Pixels more transparent than this become fully transparent.',
-        )}{/if}
-      {#if context.cursor}{@render field(
-          'Cursor hotspot (32 px)',
-          ['hotspotX', 'hotspotY'],
-          hotspot,
-        )}{/if}
-      {#if context.favicon}{@render field(
-          'App icon background',
-          ['maskableBackground'],
-          maskable,
-          'Used for the Apple touch icon and the maskable icon.',
-        )}{/if}
+      {#if context.gif}
+        <Slider
+          label="GIF transparency cut-off"
+          value={o.gifThreshold}
+          min={1}
+          max={254}
+          defaultValue={128}
+          hint="Pixels more transparent than this become fully transparent."
+          onChange={(gifThreshold) => set({ gifThreshold })}
+        />
+      {/if}
+      {#if context.cursor}
+        <Field
+          label="Cursor hotspot (32 px)"
+          changed={changed(['hotspotX', 'hotspotY'])}
+          onReset={reset(['hotspotX', 'hotspotY'])}
+        >
+          <div class="grid grid-cols-2 gap-2">
+            <NumberField
+              label="X"
+              value={o.hotspotX}
+              min={0}
+              max={31}
+              unit="px"
+              onChange={(hotspotX) => set({ hotspotX })}
+            />
+            <NumberField
+              label="Y"
+              value={o.hotspotY}
+              min={0}
+              max={31}
+              unit="px"
+              onChange={(hotspotY) => set({ hotspotY })}
+            />
+          </div>
+        </Field>
+      {/if}
+      {#if context.favicon}
+        <Field
+          label="App icon background"
+          hint="Used for the Apple touch icon and the maskable icon."
+          changed={changed(['maskableBackground'])}
+          onReset={reset(['maskableBackground'])}
+        >
+          <ColourField
+            label="Icon background colour"
+            hideLabel
+            value={o.maskableBackground}
+            onChange={(maskableBackground) => set({ maskableBackground })}
+          />
+        </Field>
+      {/if}
     </Collapsible.Content>
   </Collapsible.Root>
 </section>
