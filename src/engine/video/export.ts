@@ -36,8 +36,10 @@ const AUDIO_AHEAD = 1; // seconds of audio kept queued ahead of the video
 // A fixed-quality encode at these quantizers looks like its source; lower is better.
 const QUANTIZER: Partial<Record<string, number>> = { avc: 18, hevc: 20, vp9: 24, av1: 90 };
 const SHORTFALL = 0.8; // fraction of the asked-for video bitrate that counts as delivered
-const MAX_RETRIES = 2;
 const MAX_OVERSHOOT = 4; // cap on a raised request, as a multiple of the target
+const SAMPLE_SECONDS = 2;
+const SAMPLE_ROUNDS = 3;
+const SAMPLE_SHARE = 0.1; // of the progress bar
 
 export async function exportVideo(
   project: VideoProject,
@@ -100,7 +102,16 @@ export async function exportVideo(
       quality: new Quality({ bitrate: rate, bitrateMode: 'constant' }),
     });
 
-  const encode = async (quality: Quality) => {
+  // Renders frames [first, first + count) from timeline time first / fps; the output starts at 0.
+  const encode = async (
+    quality: Quality,
+    first: number,
+    count: number,
+    withSound: boolean,
+    report: (fraction: number) => void,
+  ) => {
+    const from = first / fps;
+    const seconds = count / fps;
     let videoBytes = 0;
     let mode: string | undefined;
     const target = new BufferTarget();
@@ -120,7 +131,7 @@ export async function exportVideo(
       onEncodedPacket: (packet) => (videoBytes += packet.byteLength),
     });
     output.addVideoTrack(video, { frameRate: fps });
-    const audioSource = hasSound
+    const audioSource = withSound
       ? new AudioSampleSource({
           codec: settings.container === 'mp4' ? 'aac' : 'opus',
           bitrate: AUDIO_BITRATE,
@@ -129,7 +140,9 @@ export async function exportVideo(
     if (audioSource) output.addAudioTrack(audioSource);
     await output.start();
 
-    const mix = hasSound ? renderMix(sound, audio, { from: 0, to: duration, gain: 1 }) : null;
+    const mix = withSound
+      ? renderMix(sound, audio, { from, to: from + seconds, gain: 1 })
+      : null;
     let audioTime = 0;
     const pumpAudio = async (until: number) => {
       if (!mix || !audioSource) return;
@@ -156,45 +169,57 @@ export async function exportVideo(
       }
     };
 
-    for (let i = 0; i < totalFrames; i++) {
+    for (let i = 0; i < count; i++) {
       const t = i / fps;
       await pumpAudio(t + AUDIO_AHEAD);
-      await compositor.draw(project, t, frames, 1);
+      await compositor.draw(project, from + t, frames, 1);
       await video.add(t, 1 / fps);
-      onProgress(Math.min(0.99, (i + 1) / totalFrames));
+      report((i + 1) / count);
     }
     await pumpAudio(Infinity);
     video.close();
     audioSource?.close();
     await output.finalize();
     if (!target.buffer) throw new Error('The export produced no output');
-    return { buffer: target.buffer, achieved: (videoBytes * 8) / duration, mode };
+    return { buffer: target.buffer, achieved: (videoBytes * 8) / seconds, mode };
   };
 
-  // Browser encoders ignore bitrate requests on calm footage, so the result is measured and redone if short.
   const quantizer = settings.targetBytes ? undefined : QUANTIZER[codec];
-  let request = bitrate;
-  let result = await encode(
+  const qualityAt = async (rate: number, withQuantizer: boolean) =>
     new Quality({
-      ...(quantizer === undefined ? {} : { quantizer }),
-      bitrate: request,
-      bitrateMode: (await constantOk(request)) ? 'constant' : 'variable',
-    }),
-  );
-  for (let retry = 0; retry < MAX_RETRIES; retry++) {
-    if (settings.targetBytes || result.achieved >= bitrate * SHORTFALL) break;
-    const usedBitrate = result.mode !== 'quantizer';
-    request = Math.min(
-      bitrate * MAX_OVERSHOOT,
-      Math.round(usedBitrate ? (request * bitrate) / result.achieved : request),
-    );
-    result = await encode(
-      new Quality({
-        bitrate: request,
-        bitrateMode: (await constantOk(request)) ? 'constant' : 'variable',
-      }),
-    );
+      ...(withQuantizer && quantizer !== undefined ? { quantizer } : {}),
+      bitrate: rate,
+      bitrateMode: (await constantOk(rate)) ? 'constant' : 'variable',
+    });
+
+  // Browser encoders ignore bitrate requests on calm footage, so a short sample from the middle is measured
+  // and the request raised before the one full encode.
+  const sampleCount = Math.min(totalFrames, Math.round(SAMPLE_SECONDS * fps));
+  const sampleFirst = Math.floor((totalFrames - sampleCount) / 2);
+  let request = bitrate;
+  let raised = false;
+  if (!settings.targetBytes) {
+    for (let round = 0; round < SAMPLE_ROUNDS; round++) {
+      const sample = await encode(
+        await qualityAt(request, !raised),
+        sampleFirst,
+        sampleCount,
+        false,
+        (f) => onProgress(((round + f) / SAMPLE_ROUNDS) * SAMPLE_SHARE),
+      );
+      if (sample.achieved >= bitrate * SHORTFALL) break;
+      const usedBitrate = sample.mode !== 'quantizer';
+      request = Math.min(
+        bitrate * MAX_OVERSHOOT,
+        Math.round(usedBitrate ? (request * bitrate) / sample.achieved : request),
+      );
+      raised = true;
+    }
   }
+  const start = settings.targetBytes ? 0 : SAMPLE_SHARE;
+  const result = await encode(await qualityAt(request, !raised), 0, totalFrames, hasSound, (f) =>
+    onProgress(Math.min(0.99, start + (1 - start) * f)),
+  );
   if (!settings.targetBytes && result.achieved < bitrate * SHORTFALL)
     notes.push(
       `This browser's encoder delivered ${(result.achieved / 1e6).toFixed(1)} Mbps of the ${(bitrate / 1e6).toFixed(1)} Mbps asked for, so quality may be lower than the source`,

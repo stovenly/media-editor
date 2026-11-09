@@ -1,4 +1,4 @@
-import{i as e,r as t}from"./__vite-browser-external-CbVku3H2.js";import{i as n,n as r,r as i,t as a}from"./video.worker-CAX6trup.js";
+import{i as e,r as t}from"./__vite-browser-external-CbVku3H2.js";import{i as n,n as r,r as i,t as a}from"./video.worker-DIVYGIMj.js";
 /*!
 * Copyright (c) 2026-present, Vanilagy and contributors
 *
