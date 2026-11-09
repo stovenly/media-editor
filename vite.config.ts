@@ -102,8 +102,13 @@ function publicFiles(): string[] {
     .map((entry) => entry.name);
 }
 
+// Git Bash rewrites BASE_PATH=/x/ to C:/Program Files/Git/x/ before node sees it.
+const base = process.env.BASE_PATH ?? '/';
+if (!base.startsWith('/'))
+  throw new Error(`BASE_PATH must be a URL path like /media-editor/, got ${base}. From Git Bash, prefix MSYS2_ENV_CONV_EXCL=BASE_PATH.`);
+
 export default defineConfig({
-  base: process.env.BASE_PATH ?? '/',
+  base,
   plugins: [svelte(), tailwindcss(), serviceWorker(), previewCsp(), manifest()],
   server: { headers: ISOLATION },
   preview: { headers: ISOLATION },

@@ -9,7 +9,7 @@ HTTPS can run it.
 ```sh
 npm ci
 npm run build                       # served from the site root
-BASE_PATH=/media-editor/ npm run build   # served from a sub-path
+BASE_PATH=/media-editor/ npm run build   # served from a sub-path (Git Bash: prefix MSYS2_ENV_CONV_EXCL=BASE_PATH)
 ```
 
 The output is `docs/`, about 70 MB. Most of it is the WebAssembly engines in
